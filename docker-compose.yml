@@ -8,6 +8,7 @@ services:
     command: ["/go/bin/account"]
     environment:
       DB_CONNECTION_STRING: user=postgres password=postgres host=postgres port=5432 dbname=postgres
+      AMQP_ADDRESS: amqp://guest:guest@rabbitmq:5672
     ports:
       - 8000:8000
     networks:
