@@ -1,0 +1,18 @@
+networks:
+  bridge:
+
+services:
+  account:
+    build:
+      target: account-builder
+    command: ["/go/bin/account"]
+    ports:
+      - 8000:8000
+    networks:
+      - bridge
+    develop:
+      watch:
+        - action: rebuild
+          path: ./account
+        - action: rebuild
+          path: ./contrib
