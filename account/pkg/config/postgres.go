@@ -18,6 +18,6 @@ func (c postgresConfig) BuildGorm() (*gorm.DB, error) {
 
 func NewPostgresConfig() postgresConfig {
 	return postgresConfig{
-		connectionString: env("DB_CONNECTION_STRING", ""),
+		connectionString: env("DB_CONNECTION_STRING", "user=postgres password=postgres host=0.0.0.0 port=5432 dbname=postgres"),
 	}
 }
