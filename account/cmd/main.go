@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -15,9 +14,12 @@ import (
 
 	_ "github.com/jackc/pgx/v5"
 	"github.com/romashorodok/test-task-bank-account/account/internal/httphandler"
+	"github.com/romashorodok/test-task-bank-account/account/pkg/command"
 	"github.com/romashorodok/test-task-bank-account/account/pkg/config"
 	"github.com/romashorodok/test-task-bank-account/account/pkg/model/account"
+	"github.com/romashorodok/test-task-bank-account/account/pkg/query"
 	"github.com/romashorodok/test-task-bank-account/contrib/backoff"
+	"github.com/romashorodok/test-task-bank-account/contrib/cqrs"
 	"github.com/romashorodok/test-task-bank-account/contrib/httputil"
 
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -166,7 +168,7 @@ func (p *Publisher) Publish(routingKey string, message amqp.Publishing) (err err
 	}
 	defer func() {
 		if closeErr := channel.Close(); closeErr != nil {
-			err = closeErr
+			log.Println("Publisher close error", closeErr)
 		}
 	}()
 	// NOTE: channel may be a transactional
@@ -187,13 +189,23 @@ func (p *Publisher) Publish(routingKey string, message amqp.Publishing) (err err
 	if err = channel.Publish(
 		p.exchangeName,
 		routingKey,
-		false,
+		true,
 		false,
 		message,
 	); err != nil {
 		log.Printf("Publisher %s publish. Err: %s", p.exchangeName, err)
 		return err
 	}
+
+	go func() {
+		ch := make(chan amqp.Return)
+		returnCh := channel.NotifyReturn(ch)
+
+		select {
+		case returnResult, closed := <-returnCh:
+			log.Println("Unable send msg", closed, returnResult)
+		}
+	}()
 
 	return
 }
@@ -459,77 +471,99 @@ func main() {
 	accountHandler := httphandler.NewAccountHandler()
 	accountHandler.RegisterHandler()
 
-	amqpConfig := config.NewAmpqConfig()
+	bus := cqrs.NewBusContext()
 
-	consumer, err := NewConsumer(amqpConfig.Address, "logs_direct")
-	if err != nil {
-		panic(err)
-	}
-	go consumer.Consume(context.Background(), "info-1", "info")
-	go consumer.Consume(context.Background(), "info-2", "info")
-	// go consumer.Consume(context.Background(), "warning-1", "warning")
-	// go consumer.Consume(context.Background(), "warning-2", "warning")
-	// go consumer.Consume(context.Background(), "error-1", "error")
-	// go consumer.Consume(context.Background(), "error-2", "error")
+	cqrs.Register(bus, (*query.GetAccountQuery)(nil), &query.GetAccountQueryHandler{})
+	cqrs.Register(bus, (*command.CreateAccountCommand)(nil), &command.CreateAccountCommandHandler{})
 
-	_ = consumer
+	cqrs.Dispatch(bus, context.Background(), query.NewGetAccountQuery())
+	cqrs.Dispatch(bus, context.Background(), command.NewCreateAccountCommand(&command.CreateAccountParams{}))
 
-	ampqConn, err := NewPublisher(amqpConfig.Address, "logs_direct")
-	if err != nil {
-		panic(err)
-	}
-	defer ampqConn.Close()
-	_ = ampqConn
+	// TODO: Options pattern and uber.fx ???
+	// cqrs.RegisterCommand(
+	// 	bus,
+	// 	(*command.CreateAccountCommand)(nil),
+	// 	command.NewCreateAccountCommandHandler(),
+	// )
+	//
+	// cqrs.DispatchCommand(
+	// 	bus,
+	// 	context.Background(),
+	// 	command.NewCreateAccountCommand(&command.CreateAccountParams{}),
+	// )
 
-	go func() {
-		ticker := time.NewTicker(time.Second * 2)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-context.Background().Done():
-				return
-			case <-ticker.C:
-				ampqConn.Publish(
-					"info",
-					amqp.Publishing{
-						ContentType: "text/plain",
-						Body:        []byte(fmt.Sprintf("text from info 1 %s", time.Now())),
-					},
-				)
-				ampqConn.Publish(
-					"info",
-					amqp.Publishing{
-						ContentType: "text/plain",
-						Body:        []byte(fmt.Sprintf("text from info 2 %s", time.Now())),
-					},
-				)
-				ampqConn.Publish(
-					"info",
-					amqp.Publishing{
-						ContentType: "text/plain",
-						Body:        []byte(fmt.Sprintf("text from info 3 %s", time.Now())),
-					},
-				)
-
-				// ampqConn.Publish(
-				// 	"warning",
-				// 	amqp.Publishing{
-				// 		ContentType: "text/plain",
-				// 		Body:        []byte("text from warning"),
-				// 	},
-				// )
-				// ampqConn.Publish(
-				// 	"error",
-				// 	amqp.Publishing{
-				// 		ContentType: "text/plain",
-				// 		Body:        []byte("text from error"),
-				// 	},
-				// )
-
-			}
-		}
-	}()
+	// amqpConfig := config.NewAmpqConfig()
+	//
+	// consumer, err := NewConsumer(amqpConfig.Address, "logs_direct")
+	// if err != nil {
+	// 	panic(err)
+	// }
+	// go consumer.Consume(context.Background(), "info-1", "info")
+	// go consumer.Consume(context.Background(), "info-2", "info")
+	// // go consumer.Consume(context.Background(), "warning-1", "warning")
+	// // go consumer.Consume(context.Background(), "warning-2", "warning")
+	// // go consumer.Consume(context.Background(), "error-1", "error")
+	// // go consumer.Consume(context.Background(), "error-2", "error")
+	// // _ = consumer
+	//
+	// ampqConn, err := NewPublisher(amqpConfig.Address, "logs_direct")
+	// if err != nil {
+	// 	panic(err)
+	// }
+	// defer ampqConn.Close()
+	// _ = ampqConn
+	//
+	// go func() {
+	// 	ticker := time.NewTicker(time.Second * 2)
+	// 	defer ticker.Stop()
+	//
+	// 	for {
+	// 		select {
+	// 		case <-context.Background().Done():
+	// 			return
+	// 		case <-ticker.C:
+	// 			ampqConn.Publish(
+	// 				"info",
+	// 				amqp.Publishing{
+	// 					ContentType: "text/plain",
+	// 					Body:        []byte(fmt.Sprintf("text from info 1 %s", time.Now())),
+	// 				},
+	// 			)
+	// 			ampqConn.Publish(
+	// 				"info",
+	// 				amqp.Publishing{
+	// 					ContentType:  "text/plain",
+	// 					Body:         []byte(fmt.Sprintf("text from info 2 %s", time.Now())),
+	// 					DeliveryMode: 2,
+	// 				},
+	// 			)
+	// 			ampqConn.Publish(
+	// 				"info",
+	// 				amqp.Publishing{
+	// 					ContentType:  "text/plain",
+	// 					Body:         []byte(fmt.Sprintf("text from info 3 %s", time.Now())),
+	// 					DeliveryMode: 2,
+	// 				},
+	// 			)
+	//
+	// 			// ampqConn.Publish(
+	// 			// 	"warning",
+	// 			// 	amqp.Publishing{
+	// 			// 		ContentType: "text/plain",
+	// 			// 		Body:        []byte("text from warning"),
+	// 			// 	},
+	// 			// )
+	// 			// ampqConn.Publish(
+	// 			// 	"error",
+	// 			// 	amqp.Publishing{
+	// 			// 		ContentType: "text/plain",
+	// 			// 		Body:        []byte("text from error"),
+	// 			// 	},
+	// 			// )
+	//
+	// 		}
+	// 	}
+	// }()
 
 	go func() {
 		if err := http.ListenAndServe(":8000", nil); err != nil {
