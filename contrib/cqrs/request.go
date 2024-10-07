@@ -68,3 +68,20 @@ func Dispatch[F any](bus requestDispatchable, ctx context.Context, request Reque
 	}
 	return err
 }
+
+func DispatchQuery[F any](bus *BusContext, ctx context.Context, query Request[F]) (F, error) {
+	queryName := typeName(query)
+	queryHandler, exist := bus.handlers[queryName]
+	if !exist {
+		var empty F
+		return empty, fmt.Errorf("not found %s handler.", queryName)
+	}
+
+	result, err := queryHandler.Handle(ctx, query.(Request[any]))
+	if err != nil {
+		var empty F
+		return empty, err
+	}
+
+	return result.(F), err
+}

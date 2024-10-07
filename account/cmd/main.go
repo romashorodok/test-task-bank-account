@@ -7,15 +7,14 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	_ "github.com/jackc/pgx/v5"
 	"github.com/romashorodok/test-task-bank-account/account/internal/httphandler"
+	"github.com/romashorodok/test-task-bank-account/account/pkg/command"
 	"github.com/romashorodok/test-task-bank-account/account/pkg/config"
 	"github.com/romashorodok/test-task-bank-account/account/pkg/model/account"
 	"github.com/romashorodok/test-task-bank-account/account/pkg/query"
 	"github.com/romashorodok/test-task-bank-account/contrib/cqrs"
-	"github.com/romashorodok/test-task-bank-account/contrib/httputil"
 )
 
 var DB_TABLES = []interface{}{
@@ -33,28 +32,31 @@ func main() {
 
 	db.AutoMigrate(DB_TABLES...)
 
-	accountHandler := httphandler.NewAccountHandler()
-	accountHandler.RegisterHandler()
-
 	amqpConfig := config.NewAmpqConfig()
 	bus, err := cqrs.NewBusRabbitMQ(amqpConfig.Address, "events")
 	if err != nil {
 		panic(err)
 	}
+	cqrs.Register(bus, context.Background(), &command.CreateAccountCommand{}, command.NewCreateAccountCommandHandler())
 
-	cqrs.Register(bus, context.Background(), &query.GetAccountQuery{}, &query.GetAccountQueryHandler{})
+	queryBus := cqrs.NewBusContext()
+	cqrs.Register(queryBus, context.Background(), &query.GetAccountQuery{}, query.NewGetAccountQueryHandler(db))
+
+	accountHandler := httphandler.NewAccountHandler(queryBus, bus)
+	accountHandler.RegisterHandler()
+
 	// cqrs.Register(bus, context.Background(), (*command.CreateAccountCommand)(nil), &command.CreateAccountCommandHandler{})
 
-	go func() {
-		ticker := time.NewTicker(time.Second * 2)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				cqrs.Dispatch(bus, context.TODO(), query.NewGetAccountQuery())
-			}
-		}
-	}()
+	// go func() {
+	// 	ticker := time.NewTicker(time.Second * 2)
+	// 	defer ticker.Stop()
+	// 	for {
+	// 		select {
+	// 		case <-ticker.C:
+	// 			cqrs.Dispatch(bus, context.Background(), command.NewCreateAccountCommand(&command.CreateAccountBody{}))
+	// 		}
+	// 	}
+	// }()
 
 	// cqrs.Dispatch(bus, context.Background(), query.NewGetAccountQuery())
 	// cqrs.Dispatch(bus, context.Background(), command.NewCreateAccountCommand(&command.CreateAccountParams{}))
@@ -163,7 +165,7 @@ func main() {
 	_ = db
 
 	// gorm.DB()
-	httputil.HelloWorld()
+	// httputil.HelloWorld()
 
 	select {
 	case <-sigterm:

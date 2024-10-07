@@ -1,8 +1,12 @@
 package httputil
 
+import (
+	"net/http"
+)
 
-import "log"
-
-func HelloWorld() {
-	log.Println("hello world")
+func JSONResponse(next http.Handler) http.HandlerFunc {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		next.ServeHTTP(w, r)
+	})
 }

@@ -7,36 +7,37 @@ import (
 	"github.com/romashorodok/test-task-bank-account/contrib/cqrs"
 )
 
-type CreateAccountParams struct{}
+type CreateAccountBody struct{}
 
-var _ cqrs.Request[*CreateAccountParams] = (*CreateAccountCommand)(nil)
+var _ cqrs.Request[*CreateAccountBody] = (*CreateAccountCommand)(nil)
 
 type CreateAccountCommand struct {
-	params *CreateAccountParams
-}
-
-func (c *CreateAccountCommand) Decode([]byte) error {
-	panic("unimplemented")
+	params *CreateAccountBody
 }
 
 func (c *CreateAccountCommand) Encode() ([]byte, error) {
-	panic("unimplemented")
+	return nil, nil
 }
 
-func (c *CreateAccountCommand) Unbox() *CreateAccountParams {
+func (c *CreateAccountCommand) Unbox() *CreateAccountBody {
 	return c.params
 }
 
-func NewCreateAccountCommand(params *CreateAccountParams) *CreateAccountCommand {
+func NewCreateAccountCommand(params *CreateAccountBody) *CreateAccountCommand {
 	return &CreateAccountCommand{params}
 }
 
-var _ cqrs.Handler[*CreateAccountParams, *CreateAccountCommand] = (*CreateAccountCommandHandler)(nil)
+var _ cqrs.Handler[*CreateAccountBody, *CreateAccountCommand] = (*CreateAccountCommandHandler)(nil)
 
 type CreateAccountCommandHandler struct{}
 
-func (c *CreateAccountCommandHandler) Handle(ctx context.Context, command *CreateAccountCommand) (*CreateAccountParams, error) {
+func (c *CreateAccountCommandHandler) Factory(data []byte) (cqrs.Request[*CreateAccountBody], error) {
+	panic("unimplemented")
+}
+
+func (c *CreateAccountCommandHandler) Handle(ctx context.Context, request *CreateAccountCommand) (*CreateAccountBody, error) {
 	log.Println("handle a create account command")
+
 	return nil, nil
 }
 
