@@ -37,7 +37,10 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	cqrs.Register(bus, context.Background(), &command.CreateAccountCommand{}, command.NewCreateAccountCommandHandler())
+	ctx := context.Background()
+	// cqrs.Register(bus, ctx, &command.CreateAccountCommand{}, command.NewCreateAccountCommandHandler())
+	cqrs.Register(bus, ctx, &command.DepositAccountCommand{}, command.NewDepositAccountCommandHandler(db))
+	cqrs.Register(bus, ctx, &command.WithdrawAccountCommand{}, command.NewWithdrawAccountCommandHandler(db))
 
 	queryBus := cqrs.NewBusContext()
 	cqrs.Register(queryBus, context.Background(), &query.GetAccountQuery{}, query.NewGetAccountQueryHandler(db))

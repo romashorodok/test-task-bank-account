@@ -2,9 +2,9 @@ package httphandler
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
 
+	"github.com/romashorodok/test-task-bank-account/account/pkg/command"
 	"github.com/romashorodok/test-task-bank-account/account/pkg/query"
 	"github.com/romashorodok/test-task-bank-account/contrib/cqrs"
 	"github.com/romashorodok/test-task-bank-account/contrib/httputil"
@@ -43,13 +43,21 @@ func (a *AccountHandler) getAccounts(w http.ResponseWriter, r *http.Request) {
 
 func (a *AccountHandler) withdraw(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	_ = id
+
+	if err := cqrs.Dispatch(a.commandBus, r.Context(), command.NewWithdrawAccountCommand(id, 20)); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
 }
 
 func (a *AccountHandler) deposit(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	log.Println("deposit route", id)
-	_ = id
+
+	if err := cqrs.Dispatch(a.commandBus, r.Context(), command.NewDepositAccountCommand(id, 20)); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	// json.NewEncoder(w).Encode(v any)
 }
 
 func (h *AccountHandler) RegisterHandler() {
