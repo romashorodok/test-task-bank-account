@@ -15,11 +15,11 @@ type CreateAccountCommand struct {
 	params *CreateAccountParams
 }
 
-func (c *CreateAccountCommand) Deserialize([]byte) *CreateAccountParams {
+func (c *CreateAccountCommand) Decode([]byte) error {
 	panic("unimplemented")
 }
 
-func (c *CreateAccountCommand) Serialize(params *CreateAccountParams) []byte {
+func (c *CreateAccountCommand) Encode() ([]byte, error) {
 	panic("unimplemented")
 }
 

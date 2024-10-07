@@ -2,30 +2,24 @@ package query
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 
 	"github.com/romashorodok/test-task-bank-account/contrib/cqrs"
 )
 
 type Account struct {
-	Name string
+	Name string `json:"name"`
 }
 
 type GetAccountQuery struct {
 	account *Account
 }
 
-// Deserialize implements cqrs.Query.
-func (g *GetAccountQuery) Deserialize([]byte) *Account {
-	panic("unimplemented")
+func (g *GetAccountQuery) Encode() ([]byte, error) {
+	return json.Marshal(g.account)
 }
 
-// Serialize implements cqrs.Query.
-func (g *GetAccountQuery) Serialize(*Account) []byte {
-	panic("unimplemented")
-}
-
-// Unbox implements cqrs.Query.
 func (g *GetAccountQuery) Unbox() *Account {
 	panic("unimplemented")
 }
@@ -37,6 +31,17 @@ func NewGetAccountQuery() *GetAccountQuery {
 }
 
 type GetAccountQueryHandler struct{}
+
+func (g *GetAccountQueryHandler) Factory(data []byte) (cqrs.Request[*Account], error) {
+	log.Println("Get account data decode", data)
+	var account Account
+	if err := json.Unmarshal(data, &account); err != nil {
+		return nil, err
+	}
+	return &GetAccountQuery{
+		account: &account,
+	}, nil
+}
 
 func (g *GetAccountQueryHandler) Handle(ctx context.Context, query *GetAccountQuery) (*Account, error) {
 	log.Println("GetAccountQuery handler works")
