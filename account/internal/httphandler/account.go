@@ -2,8 +2,10 @@ package httphandler
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/romashorodok/test-task-bank-account/account/pkg/command"
 	"github.com/romashorodok/test-task-bank-account/account/pkg/query"
 	"github.com/romashorodok/test-task-bank-account/contrib/cqrs"
@@ -42,7 +44,8 @@ func (a *AccountHandler) getAccounts(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *AccountHandler) withdraw(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	id := chi.URLParam(r, "id")
+	log.Println(("Withdraw handler run"))
 
 	if err := cqrs.Dispatch(a.commandBus, r.Context(), command.NewWithdrawAccountCommand(id, 20)); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -51,7 +54,8 @@ func (a *AccountHandler) withdraw(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *AccountHandler) deposit(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	id := chi.URLParam(r, "id")
+	log.Println(("Deposit handler run"))
 
 	if err := cqrs.Dispatch(a.commandBus, r.Context(), command.NewDepositAccountCommand(id, 20)); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -60,17 +64,14 @@ func (a *AccountHandler) deposit(w http.ResponseWriter, r *http.Request) {
 	// json.NewEncoder(w).Encode(v any)
 }
 
-func (h *AccountHandler) RegisterHandler() {
-	handlers := map[string]http.HandlerFunc{
-		"POST /account":               h.createAccount,
-		"GET /account":                h.getAccounts,
-		"POST /account/{id}/withdraw": h.withdraw,
-		"POST /account/{id}/deposit":  h.deposit,
-	}
+func (h *AccountHandler) RegisterHandler(router *chi.Mux) {
+	router.Route("/account", func(r chi.Router) {
+		r.Use(httputil.JSONResponse)
 
-	for route, handler := range handlers {
-		http.HandleFunc(route, httputil.JSONResponse(handler))
-	}
+		r.Get("/", h.getAccounts)
+		r.Post("/{id}/withdraw", h.withdraw)
+		r.Post("/{id}/deposit", h.deposit)
+	})
 }
 
 func NewAccountHandler(queryBus *cqrs.BusContext, commandBus *cqrs.BusRabbitMQ) *AccountHandler {

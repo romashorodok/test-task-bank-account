@@ -3,6 +3,7 @@ package command
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 
 	"github.com/romashorodok/test-task-bank-account/account/pkg/model/account"
@@ -94,6 +95,7 @@ func (d *DepositAccountCommandHandler) Factory(data []byte) (cqrs.Request[*Depos
 }
 
 func (d *DepositAccountCommandHandler) Handle(ctx context.Context, request *DepositAccountCommand) (*DepositAccountBody, error) {
+	log.Println("Deposit run")
 	if err := d.db.Transaction(func(tx *gorm.DB) error {
 		acc := &account.Account{}
 
@@ -168,8 +170,6 @@ func (w *WithdrawAccountCommandHandler) Handle(ctx context.Context, request *Wit
 	if err := w.db.Transaction(func(tx *gorm.DB) error {
 		acc := &account.Account{}
 
-		// SELECT * FROM accounts WHERE id = ? FOR UPDATE;
-		// NOTE: Hold lock for the row for all tx and release when commit or rollback it
 		if err := tx.Clauses(clause.Locking{
 			Strength: "UPDATE",
 		}).First(&acc, "id = ?", request.body.AccountID).Error; err != nil {
@@ -177,11 +177,11 @@ func (w *WithdrawAccountCommandHandler) Handle(ctx context.Context, request *Wit
 		}
 
 		acc.Balance -= account.Money(request.body.Amount)
-		log.Println("Will be a", acc.Balance)
-		// if acc.Balance < 0 {
-		// 	// TODO: this may be a reject command or event
-		// 	return errors.New("Cannot be a negative balance")
-		// }
+		if acc.Balance < 0 {
+			log.Println("Account amount cannot be a negative balance", acc.Balance)
+			// TODO: this may be a reject command or event
+			return errors.New("Cannot be a negative balance")
+		}
 
 		return tx.Save(acc).Error
 	}); err != nil {

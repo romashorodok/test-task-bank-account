@@ -66,16 +66,6 @@ func (p *Publisher) Publish(routingKey string, message amqp.Publishing) (err err
 		return err
 	}
 
-	// go func() {
-	// 	ch := make(chan amqp.Return)
-	// 	returnCh := channel.NotifyReturn(ch)
-	//
-	// 	select {
-	// 	case returnResult, closed := <-returnCh:
-	// 		log.Println("Unable send msg", closed, returnResult)
-	// 	}
-	// }()
-
 	return
 }
 

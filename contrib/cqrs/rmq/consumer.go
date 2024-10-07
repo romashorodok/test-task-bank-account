@@ -60,13 +60,13 @@ func (c *Consumer) runConsumeSubscription(ctx context.Context, consumerLabel, ro
 
 	notifyCloseChannel := channel.NotifyClose(make(chan *amqp.Error))
 
-	queue, err := channel.QueueDeclare(c.exchangeName, true, false, true, false, nil)
+	queue, err := channel.QueueDeclare(c.exchangeName, true, false, false, false, nil)
 	if err != nil {
 		log.Printf("Cannot declare %s consumer of %s. Err: %s", routingKey, c.exchangeName, err)
 		return
 	}
 
-	if err = channel.QueueBind(queue.Name, routingKey, queue.Name, false, nil); err != nil {
+	if err = channel.QueueBind(routingKey, routingKey, queue.Name, false, nil); err != nil {
 		log.Printf("Unable bind queue name: %s routing key: %s, exchange: %s. Err: %s", queue.Name, routingKey, queue.Name, err)
 		return
 	}
@@ -74,7 +74,7 @@ func (c *Consumer) runConsumeSubscription(ctx context.Context, consumerLabel, ro
 	sub := subscription{
 		notifyCloseChannel: notifyCloseChannel,
 		channel:            channel,
-		queueName:          queue.Name,
+		queueName:          routingKey,
 		consumerLabel:      consumerLabel,
 		closing:            c.closing,
 	}
@@ -182,10 +182,13 @@ func (s *subscription) processMessage(ctx context.Context, msg amqp.Delivery, ha
 				return
 
 			case msg := <-in:
+				// log.Printf("Consumer %s | Process %+v", s.consumerLabel, msg)
+
 				if err := handler(ctx, msg); err != nil {
 					_ = s.nackMessage(*msg)
 					return
 				}
+
 				// log.Printf("Consumer %s | Process a message here. %+v  %s", s.consumerLabel, msg, msg.Body)
 				msg.Ack(false)
 			}

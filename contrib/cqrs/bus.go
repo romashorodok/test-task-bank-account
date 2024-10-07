@@ -53,6 +53,7 @@ type BusRabbitMQ struct {
 
 func (b *BusRabbitMQ) dispatch(ctx context.Context, request Request[any]) (result any, err error) {
 	requestName := typeName(request)
+	log.Printf("BusRabbitMQ | Dispatch %s handler", requestName)
 	msg, err := request.Encode()
 	if err != nil {
 		var emtpy any
@@ -64,12 +65,13 @@ func (b *BusRabbitMQ) dispatch(ctx context.Context, request Request[any]) (resul
 }
 
 func (b *BusRabbitMQ) register(ctx context.Context, registerName string, request Request[any], handler Handler[any, Request[any]]) {
-	log.Printf("BusRabbitMQ | Register %s handler", registerName)
+	// log.Printf("BusRabbitMQ | Register %s handler", registerName)
 	go b.consumer.Consume(
 		ctx,
 		registerName,
 		registerName,
 		func(ctx context.Context, msg *amqp.Delivery) error {
+			log.Printf("BusRabbitMQ | From handler %s handler", registerName)
 			request, err := handler.Factory(msg.Body)
 			if err != nil {
 				return err
