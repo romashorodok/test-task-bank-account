@@ -12,42 +12,62 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-type CreateAccountBody struct{}
+type CreateAccountBody struct {
+	ID account.ID `json:"id"`
+}
 
 var _ cqrs.Request[*CreateAccountBody] = (*CreateAccountCommand)(nil)
 
 type CreateAccountCommand struct {
-	params *CreateAccountBody
+	body *CreateAccountBody
 }
 
 func (c *CreateAccountCommand) Encode() ([]byte, error) {
-	return nil, nil
+	return json.Marshal(c.body)
 }
 
 func (c *CreateAccountCommand) Unbox() *CreateAccountBody {
-	return c.params
+	return nil
 }
 
-func NewCreateAccountCommand(params *CreateAccountBody) *CreateAccountCommand {
-	return &CreateAccountCommand{params}
+func NewCreateAccountCommand() *CreateAccountCommand {
+	return &CreateAccountCommand{
+		body: &CreateAccountBody{
+			ID: account.NewID(),
+		},
+	}
 }
 
 var _ cqrs.Handler[*CreateAccountBody, *CreateAccountCommand] = (*CreateAccountCommandHandler)(nil)
 
-type CreateAccountCommandHandler struct{}
+type CreateAccountCommandHandler struct {
+	db *gorm.DB
+}
 
 func (c *CreateAccountCommandHandler) Factory(data []byte) (cqrs.Request[*CreateAccountBody], error) {
-	panic("unimplemented")
+	var body CreateAccountBody
+	if err := json.Unmarshal(data, &body); err != nil {
+		return nil, err
+	}
+	return &CreateAccountCommand{
+		body: &body,
+	}, nil
 }
 
 func (c *CreateAccountCommandHandler) Handle(ctx context.Context, request *CreateAccountCommand) (*CreateAccountBody, error) {
-	log.Println("handle a create account command")
+	if err := c.db.Create(&account.Account{
+		ID: request.body.ID,
+	}).Error; err != nil {
+		return nil, err
+	}
 
 	return nil, nil
 }
 
-func NewCreateAccountCommandHandler() *CreateAccountCommandHandler {
-	return &CreateAccountCommandHandler{}
+func NewCreateAccountCommandHandler(db *gorm.DB) *CreateAccountCommandHandler {
+	return &CreateAccountCommandHandler{
+		db: db,
+	}
 }
 
 type DepositAccountBody struct {

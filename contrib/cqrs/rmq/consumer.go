@@ -60,13 +60,13 @@ func (c *Consumer) runConsumeSubscription(ctx context.Context, consumerLabel, ro
 
 	notifyCloseChannel := channel.NotifyClose(make(chan *amqp.Error))
 
-	queue, err := channel.QueueDeclare(c.exchangeName, true, false, false, false, nil)
+	queue, err := channel.QueueDeclare(routingKey, true, false, false, false, nil)
 	if err != nil {
 		log.Printf("Cannot declare %s consumer of %s. Err: %s", routingKey, c.exchangeName, err)
 		return
 	}
 
-	if err = channel.QueueBind(routingKey, routingKey, queue.Name, false, nil); err != nil {
+	if err = channel.QueueBind(queue.Name, routingKey, c.exchangeName, false, nil); err != nil {
 		log.Printf("Unable bind queue name: %s routing key: %s, exchange: %s. Err: %s", queue.Name, routingKey, queue.Name, err)
 		return
 	}
@@ -74,7 +74,7 @@ func (c *Consumer) runConsumeSubscription(ctx context.Context, consumerLabel, ro
 	sub := subscription{
 		notifyCloseChannel: notifyCloseChannel,
 		channel:            channel,
-		queueName:          routingKey,
+		queueName:          queue.Name,
 		consumerLabel:      consumerLabel,
 		closing:            c.closing,
 	}

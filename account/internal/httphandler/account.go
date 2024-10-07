@@ -31,6 +31,11 @@ type AccountHandler struct {
 }
 
 func (a *AccountHandler) createAccount(w http.ResponseWriter, r *http.Request) {
+	log.Println(("Create account handler run"))
+	if err := cqrs.Dispatch(a.commandBus, r.Context(), command.NewCreateAccountCommand()); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
 }
 
 func (a *AccountHandler) getAccounts(w http.ResponseWriter, r *http.Request) {
@@ -69,6 +74,8 @@ func (h *AccountHandler) RegisterHandler(router *chi.Mux) {
 		r.Use(httputil.JSONResponse)
 
 		r.Get("/", h.getAccounts)
+		r.Post("/", h.createAccount)
+
 		r.Post("/{id}/withdraw", h.withdraw)
 		r.Post("/{id}/deposit", h.deposit)
 	})
