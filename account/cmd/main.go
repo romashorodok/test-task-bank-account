@@ -15,7 +15,6 @@ import (
 	"github.com/romashorodok/test-task-bank-account/account/pkg/command"
 	"github.com/romashorodok/test-task-bank-account/account/pkg/config"
 	"github.com/romashorodok/test-task-bank-account/account/pkg/model/account"
-	"github.com/romashorodok/test-task-bank-account/account/pkg/query"
 	"github.com/romashorodok/test-task-bank-account/contrib/cqrs"
 )
 
@@ -40,12 +39,12 @@ func main() {
 		panic(err)
 	}
 	ctx := context.Background()
-	cqrs.Register(bus, ctx, &command.CreateAccountCommand{}, command.NewCreateAccountCommandHandler(db))
+	// cqrs.Register(bus, ctx, &command.CreateAccountCommand{}, command.NewCreateAccountCommandHandler(db))
 	cqrs.Register(bus, ctx, &command.DepositAccountCommand{}, command.NewDepositAccountCommandHandler(db))
-	cqrs.Register(bus, ctx, &command.WithdrawAccountCommand{}, command.NewWithdrawAccountCommandHandler(db))
+	// cqrs.Register(bus, ctx, &command.WithdrawAccountCommand{}, command.NewWithdrawAccountCommandHandler(db))
 
 	queryBus := cqrs.NewBusContext()
-	cqrs.Register(queryBus, ctx, &query.GetAccountQuery{}, query.NewGetAccountQueryHandler(db))
+	// cqrs.Register(queryBus, ctx, &query.GetAccountQuery{}, query.NewGetAccountQueryHandler(db))
 
 	router := chi.NewRouter()
 

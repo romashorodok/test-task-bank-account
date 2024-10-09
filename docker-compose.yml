@@ -2,23 +2,23 @@ networks:
   bridge:
 
 services:
-  account:
-    build:
-      target: account-builder
-    command: ["/go/bin/account"]
-    environment:
-      DB_CONNECTION_STRING: user=postgres password=postgres host=postgres port=5432 dbname=postgres
-      AMQP_ADDRESS: amqp://guest:guest@rabbitmq:5672
-    ports:
-      - 8000:8000
-    networks:
-      - bridge
-    develop:
-      watch:
-        - action: rebuild
-          path: ./account
-        - action: rebuild
-          path: ./contrib
+  # account:
+  #   build:
+  #     target: account-builder
+  #   command: ["/go/bin/account"]
+  #   environment:
+  #     DB_CONNECTION_STRING: user=postgres password=postgres host=postgres port=5432 dbname=postgres
+  #     AMQP_ADDRESS: amqp://guest:guest@rabbitmq:5672
+  #   ports:
+  #     - 8000:8000
+  #   networks:
+  #     - bridge
+  #   develop:
+  #     watch:
+  #       - action: rebuild
+  #         path: ./account
+  #       - action: rebuild
+  #         path: ./contrib
 
   postgres:
     image: postgres:17.0-alpine3.20

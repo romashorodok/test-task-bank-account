@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/google/uuid"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/romashorodok/test-task-bank-account/contrib/cqrs/rmq"
 )
@@ -41,14 +42,68 @@ func typeName(typeObject any) string {
 	return strings.Split(h, ".")[1]
 }
 
-var (
-	_ requestRegistrable  = (*BusRabbitMQ)(nil)
-	_ requestDispatchable = (*BusRabbitMQ)(nil)
-)
+const _MESSAGE_UUID_HEADER = "__uuid"
+
+type AmqpMessageMarshaller struct{}
+
+func (AmqpMessageMarshaller) Marshal(msg *Message) amqp.Publishing {
+	headers := make(amqp.Table, len(msg.Metadata)+1) // metadata + plus uuid
+
+	for key, value := range msg.Metadata {
+		headers[key] = value
+	}
+	headers[_MESSAGE_UUID_HEADER] = msg.UUID
+
+	return amqp.Publishing{
+		Body:    msg.Payload,
+		Headers: headers,
+	}
+}
+
+func (a AmqpMessageMarshaller) Unmarshal(amqpMsg *amqp.Delivery) (*Message, error) {
+	msgUUID, err := a.unmarshalMessageUUID(amqpMsg)
+	if err != nil {
+		return nil, err
+	}
+
+	msg := NewMessage(msgUUID, amqpMsg.Body)
+	msg.Metadata = make(Metadata, len(amqpMsg.Headers)-1) // headers - minus uuid
+
+	for key, value := range amqpMsg.Headers {
+		if key == _MESSAGE_UUID_HEADER {
+			continue
+		}
+
+		var ok bool
+		msg.Metadata[key], ok = value.(string)
+		if !ok {
+			return nil, fmt.Errorf("metadata %s is not a string, but %#v", key, value)
+		}
+	}
+	return msg, nil
+}
+
+func (a AmqpMessageMarshaller) unmarshalMessageUUID(amqpMsg *amqp.Delivery) (string, error) {
+	var msgUUIDStr string
+
+	msgUUID, hasMsgUUID := amqpMsg.Headers[_MESSAGE_UUID_HEADER]
+	if !hasMsgUUID {
+		return "", nil
+	}
+
+	msgUUIDStr, hasMsgUUID = msgUUID.(string)
+	if !hasMsgUUID {
+		return "", fmt.Errorf("message UUID is not a string, but: %#v", msgUUID)
+	}
+
+	return msgUUIDStr, nil
+}
 
 type BusRabbitMQ struct {
 	publisher *rmq.Publisher
 	consumer  *rmq.Consumer
+
+	marshaller AmqpMessageMarshaller
 }
 
 func (b *BusRabbitMQ) dispatch(ctx context.Context, request Request[any]) (result any, err error) {
@@ -59,9 +114,13 @@ func (b *BusRabbitMQ) dispatch(ctx context.Context, request Request[any]) (resul
 		var emtpy any
 		return emtpy, err
 	}
-	return nil, b.publisher.Publish(requestName, amqp.Publishing{
-		Body: msg,
-	})
+
+	msg.Metadata.Set("name", requestName)
+	msg.Metadata.Set(_AGGREGATE_ID, uuid.New().String())
+
+	pub := b.marshaller.Marshal(msg)
+
+	return nil, b.publisher.Publish(requestName, pub)
 }
 
 func (b *BusRabbitMQ) register(ctx context.Context, registerName string, request Request[any], handler Handler[any, Request[any]]) {
@@ -70,9 +129,15 @@ func (b *BusRabbitMQ) register(ctx context.Context, registerName string, request
 		ctx,
 		registerName,
 		registerName,
-		func(ctx context.Context, msg *amqp.Delivery) error {
+		func(ctx context.Context, amqpMsg *amqp.Delivery) error {
 			log.Printf("BusRabbitMQ | From handler %s handler", registerName)
-			request, err := handler.Factory(msg.Body)
+			msg, err := b.marshaller.Unmarshal(amqpMsg)
+			if err != nil {
+				log.Println("Unable unmarshal message from rmq")
+				return err
+			}
+
+			request, err := handler.Factory(msg)
 			if err != nil {
 				return err
 			}
@@ -81,6 +146,11 @@ func (b *BusRabbitMQ) register(ctx context.Context, registerName string, request
 		},
 	)
 }
+
+var (
+	_ requestRegistrable  = (*BusRabbitMQ)(nil)
+	_ requestDispatchable = (*BusRabbitMQ)(nil)
+)
 
 func NewBusRabbitMQ(address string, exchangeName string) (*BusRabbitMQ, error) {
 	consumer, err := rmq.NewConsumer(address, exchangeName)

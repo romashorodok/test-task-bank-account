@@ -7,24 +7,24 @@ import (
 )
 
 type Request[F any] interface {
-	Encode() ([]byte, error)
+	Encode() (*Message, error)
 	Unbox() F
 }
 
 type Handler[A any, F Request[A]] interface {
 	Handle(ctx context.Context, request F) (A, error)
-	Factory(data []byte) (Request[A], error)
+	Factory(*Message) (Request[A], error)
 }
 
 var _ Handler[any, Request[any]] = (*requestWrapper)(nil)
 
 type requestWrapper struct {
 	cb        func(ctx context.Context, query Request[any]) (any, error)
-	cbFactory func([]byte) (Request[any], error)
+	cbFactory func(msg *Message) (Request[any], error)
 }
 
-func (r *requestWrapper) Factory(data []byte) (Request[any], error) {
-	return r.cbFactory(data)
+func (r *requestWrapper) Factory(msg *Message) (Request[any], error) {
+	return r.cbFactory(msg)
 }
 
 func (q *requestWrapper) Handle(ctx context.Context, query Request[any]) (any, error) {
@@ -47,8 +47,8 @@ func Register[A any, F Request[A]](bus requestRegistrable, ctx context.Context, 
 			}
 			return handler.Handle(ctx, typedQuery)
 		},
-		cbFactory: func(data []byte) (Request[any], error) {
-			result, err := handler.Factory(data)
+		cbFactory: func(msg *Message) (Request[any], error) {
+			result, err := handler.Factory(msg)
 			if err != nil {
 				return nil, err
 			}
