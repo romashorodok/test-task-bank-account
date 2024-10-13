@@ -1,6 +1,9 @@
 package config
 
 import (
+	"context"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -14,6 +17,10 @@ func (c postgresConfig) BuildGorm() (*gorm.DB, error) {
 		DSN:                  c.connectionString,
 		PreferSimpleProtocol: true,
 	}), &gorm.Config{})
+}
+
+func (c postgresConfig) BuildPool() (*pgxpool.Pool, error) {
+	return pgxpool.New(context.Background(), c.connectionString)
 }
 
 func NewPostgresConfig() postgresConfig {

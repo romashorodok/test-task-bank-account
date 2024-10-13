@@ -6,7 +6,8 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/romashorodok/test-task-bank-account/account/pkg/command"
+	"github.com/romashorodok/test-task-bank-account/account/pkg/model/account"
+
 	// "github.com/romashorodok/test-task-bank-account/account/pkg/query"
 	"github.com/romashorodok/test-task-bank-account/contrib/cqrs"
 	"github.com/romashorodok/test-task-bank-account/contrib/httputil"
@@ -61,10 +62,11 @@ func (a *AccountHandler) deposit(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	log.Println(("Deposit handler run"))
 
-	if err := cqrs.Dispatch(a.commandBus, r.Context(), command.NewDepositAccountCommand(id, 20)); err != nil {
+	if err := cqrs.Dispatch(a.commandBus, r.Context(), account.NewDepositAccountEvent(id, 20)); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+
 	// json.NewEncoder(w).Encode(v any)
 }
 

@@ -13,14 +13,14 @@ import (
 )
 
 type BusContext struct {
-	handlers map[string]Handler[any, Request[any]]
+	handlers map[string]Handler[any, Request]
 }
 
-func (b *BusContext) register(ctx context.Context, requestName string, request Request[any], handler Handler[any, Request[any]]) {
+func (b *BusContext) register(ctx context.Context, requestName string, request Request, handler Handler[any, Request]) {
 	b.handlers[requestName] = handler
 }
 
-func (b *BusContext) dispatch(ctx context.Context, request Request[any]) (result any, err error) {
+func (b *BusContext) dispatch(ctx context.Context, request Request) (result any, err error) {
 	requestName := typeName(request)
 
 	handler, exist := b.handlers[requestName]
@@ -33,7 +33,7 @@ func (b *BusContext) dispatch(ctx context.Context, request Request[any]) (result
 
 func NewBusContext() *BusContext {
 	return &BusContext{
-		handlers: make(map[string]Handler[any, Request[any]]),
+		handlers: make(map[string]Handler[any, Request]),
 	}
 }
 
@@ -84,13 +84,12 @@ func (a AmqpMessageMarshaller) Unmarshal(amqpMsg *amqp.Delivery) (*Message, erro
 }
 
 func (a AmqpMessageMarshaller) unmarshalMessageUUID(amqpMsg *amqp.Delivery) (string, error) {
-	var msgUUIDStr string
-
 	msgUUID, hasMsgUUID := amqpMsg.Headers[_MESSAGE_UUID_HEADER]
 	if !hasMsgUUID {
 		return "", nil
 	}
 
+	var msgUUIDStr string
 	msgUUIDStr, hasMsgUUID = msgUUID.(string)
 	if !hasMsgUUID {
 		return "", fmt.Errorf("message UUID is not a string, but: %#v", msgUUID)
@@ -106,7 +105,7 @@ type BusRabbitMQ struct {
 	marshaller AmqpMessageMarshaller
 }
 
-func (b *BusRabbitMQ) dispatch(ctx context.Context, request Request[any]) (result any, err error) {
+func (b *BusRabbitMQ) dispatch(ctx context.Context, request Request) (result any, err error) {
 	requestName := typeName(request)
 	log.Printf("BusRabbitMQ | Dispatch %s handler", requestName)
 	msg, err := request.Encode()
@@ -123,7 +122,7 @@ func (b *BusRabbitMQ) dispatch(ctx context.Context, request Request[any]) (resul
 	return nil, b.publisher.Publish(requestName, pub)
 }
 
-func (b *BusRabbitMQ) register(ctx context.Context, registerName string, request Request[any], handler Handler[any, Request[any]]) {
+func (b *BusRabbitMQ) register(ctx context.Context, registerName string, request Request, handler Handler[any, Request]) {
 	// log.Printf("BusRabbitMQ | Register %s handler", registerName)
 	go b.consumer.Consume(
 		ctx,

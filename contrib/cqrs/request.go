@@ -6,70 +6,68 @@ import (
 	"fmt"
 )
 
-type Request[F any] interface {
+type Request interface {
 	Encode() (*Message, error)
-	Unbox() F
 }
 
-type Handler[A any, F Request[A]] interface {
+type Handler[A any, F Request] interface {
 	Handle(ctx context.Context, request F) (A, error)
-	Factory(*Message) (Request[A], error)
+	Factory(*Message) (Request, error)
 }
 
-var _ Handler[any, Request[any]] = (*requestWrapper)(nil)
+var _ Handler[any, Request] = (*requestWrapper)(nil)
 
 type requestWrapper struct {
-	cb        func(ctx context.Context, query Request[any]) (any, error)
-	cbFactory func(msg *Message) (Request[any], error)
+	cb        func(ctx context.Context, query Request) (any, error)
+	cbFactory func(msg *Message) (Request, error)
 }
 
-func (r *requestWrapper) Factory(msg *Message) (Request[any], error) {
+func (r *requestWrapper) Factory(msg *Message) (Request, error) {
 	return r.cbFactory(msg)
 }
 
-func (q *requestWrapper) Handle(ctx context.Context, query Request[any]) (any, error) {
+func (q *requestWrapper) Handle(ctx context.Context, query Request) (any, error) {
 	return q.cb(ctx, query)
 }
 
 type requestRegistrable interface {
-	register(ctx context.Context, requestName string, request Request[any], handler Handler[any, Request[any]])
+	register(ctx context.Context, requestName string, request Request, handler Handler[any, Request])
 }
 
 var ErrRegisteInvalidType = errors.New("invalid type ")
 
-func Register[A any, F Request[A]](bus requestRegistrable, ctx context.Context, query Request[A], handler Handler[A, F]) {
-	request := query.(Request[any])
-	bus.register(ctx, typeName(query), request, &requestWrapper{
-		cb: func(ctx context.Context, query Request[any]) (any, error) {
+func Register[A any, F Request](bus requestRegistrable, ctx context.Context, request Request, handler Handler[A, F]) {
+	bus.register(ctx, typeName(request), request, &requestWrapper{
+		cb: func(ctx context.Context, query Request) (any, error) {
 			typedQuery, ok := query.(F)
 			if !ok {
 				return nil, errors.Join(ErrRegisteInvalidType, fmt.Errorf("of %s request for handler %s", typeName(query), typeName(handler)))
 			}
 			return handler.Handle(ctx, typedQuery)
 		},
-		cbFactory: func(msg *Message) (Request[any], error) {
+		cbFactory: func(msg *Message) (Request, error) {
 			result, err := handler.Factory(msg)
 			if err != nil {
 				return nil, err
 			}
-			return result.(Request[any]), nil
+			return result, nil
 		},
 	})
 }
 
 type requestDispatchable interface {
-	dispatch(ctx context.Context, request Request[any]) (result any, err error)
+	dispatch(ctx context.Context, request Request) (result any, err error)
 }
 
-func Dispatch[F any](bus requestDispatchable, ctx context.Context, request Request[F]) error {
-	_, err := bus.dispatch(ctx, request.(Request[any]))
+func Dispatch(bus requestDispatchable, ctx context.Context, request Request) error {
+	_, err := bus.dispatch(ctx, request)
 	if err != nil {
 		return err
 	}
 	return err
 }
 
-func DispatchQuery[F any](bus *BusContext, ctx context.Context, query Request[F]) (F, error) {
+func DispatchQuery[F any](bus *BusContext, ctx context.Context, query Request) (F, error) {
 	queryName := typeName(query)
 	queryHandler, exist := bus.handlers[queryName]
 	if !exist {
@@ -77,7 +75,7 @@ func DispatchQuery[F any](bus *BusContext, ctx context.Context, query Request[F]
 		return empty, fmt.Errorf("not found %s handler.", queryName)
 	}
 
-	result, err := queryHandler.Handle(ctx, query.(Request[any]))
+	result, err := queryHandler.Handle(ctx, query)
 	if err != nil {
 		var empty F
 		return empty, err

@@ -77,8 +77,3 @@ func (m *Money) Scan(src any) error {
 func (m Money) Value() (driver.Value, error) {
 	return float64(m), nil
 }
-
-type Account struct {
-	ID      ID    `gorm:"type:uuid"`
-	Balance Money `gorm:"type:float"`
-}

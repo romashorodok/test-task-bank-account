@@ -16,6 +16,7 @@ import (
 	"github.com/romashorodok/test-task-bank-account/account/pkg/config"
 	"github.com/romashorodok/test-task-bank-account/account/pkg/model/account"
 	"github.com/romashorodok/test-task-bank-account/contrib/cqrs"
+	"github.com/romashorodok/test-task-bank-account/contrib/cqrs/espgx"
 )
 
 var DB_TABLES = []interface{}{
@@ -26,12 +27,20 @@ func main() {
 	sigterm := make(chan os.Signal, 1)
 	signal.Notify(sigterm, syscall.SIGTERM, syscall.SIGINT)
 
-	db, err := config.NewPostgresConfig().BuildGorm()
+	pgconfig := config.NewPostgresConfig()
+	db, err := pgconfig.BuildGorm()
 	if err != nil {
 		panic(err)
 	}
 
 	db.AutoMigrate(DB_TABLES...)
+
+	pool, err := pgconfig.BuildPool()
+	if err != nil {
+		panic(err)
+	}
+
+	es := espgx.NewEventStore(pool)
 
 	amqpConfig := config.NewAmpqConfig()
 	bus, err := cqrs.NewBusRabbitMQ(amqpConfig.Address, "events")
@@ -39,8 +48,9 @@ func main() {
 		panic(err)
 	}
 	ctx := context.Background()
+
 	// cqrs.Register(bus, ctx, &command.CreateAccountCommand{}, command.NewCreateAccountCommandHandler(db))
-	cqrs.Register(bus, ctx, &command.DepositAccountCommand{}, command.NewDepositAccountCommandHandler(db))
+	cqrs.Register(bus, ctx, &account.DepositAccountEvent{}, command.NewDepositAccountCommandHandler(db, es))
 	// cqrs.Register(bus, ctx, &command.WithdrawAccountCommand{}, command.NewWithdrawAccountCommandHandler(db))
 
 	queryBus := cqrs.NewBusContext()

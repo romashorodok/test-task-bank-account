@@ -4,71 +4,139 @@ import (
 	"context"
 	"log"
 
+	"github.com/romashorodok/test-task-bank-account/account/pkg/model/account"
 	"github.com/romashorodok/test-task-bank-account/contrib/cqrs"
 	"gorm.io/gorm"
 )
 
-type DepositAccountBody struct {
-	AccountID   string  `json:"account_id"`
-	AggregateID string  `json:"aggregate_id"`
-	Amount      float64 `json:"amount"`
-}
-
-func (d *DepositAccountBody) WithAggregateID(id string) {
-	d.AggregateID = id
-}
-
-var _ cqrs.Event = (*DepositAccountBody)(nil)
-
-type DepositAccountCommand struct {
-	body *DepositAccountBody
-
-	marshaller cqrs.MessageJsonMarshaller[*DepositAccountBody]
-}
-
-func (d *DepositAccountCommand) Encode() (*cqrs.Message, error) {
-	msg, err := d.marshaller.Marshal(d.body)
-	if err != nil {
-		return nil, err
-	}
-	return msg, nil
-}
-
-func (d *DepositAccountCommand) Unbox() *DepositAccountBody {
-	panic("unimplemented")
-}
-
-var _ cqrs.Request[*DepositAccountBody] = (*DepositAccountCommand)(nil)
-
-func NewDepositAccountCommand(accountID string, amount float64) *DepositAccountCommand {
-	return &DepositAccountCommand{
-		body: &DepositAccountBody{
-			AccountID: accountID,
-			Amount:    amount,
-		},
-	}
-}
-
 type DepositAccountCommandHandler struct {
 	db *gorm.DB
+	es cqrs.EventStore
 
-	marshaller cqrs.MessageJsonMarshaller[*DepositAccountBody]
+	marshaller cqrs.MessageJsonMarshaller
 }
 
-func (d *DepositAccountCommandHandler) Factory(msg *cqrs.Message) (cqrs.Request[*DepositAccountBody], error) {
-	var body DepositAccountBody
+func (d *DepositAccountCommandHandler) Factory(msg *cqrs.Message) (cqrs.Request, error) {
+	var command account.DepositAccountEvent
 
-	if err := d.marshaller.Unmarshal(msg, &body); err != nil {
+	if err := d.marshaller.Unmarshal(msg, &command); err != nil {
 		return nil, err
 	}
 
-	return &DepositAccountCommand{
-		body: &body,
-	}, nil
+	return &command, nil
 }
 
-func (d *DepositAccountCommandHandler) Handle(ctx context.Context, request *DepositAccountCommand) (*DepositAccountBody, error) {
-	log.Printf("Deposit run %+v %+v", request, request.body)
+type accountRepository struct {
+	r *cqrs.Repository[*account.Account]
+}
+
+func NewAccountRepository(es cqrs.EventStore) *accountRepository {
+	return &accountRepository{
+		r: cqrs.NewRepository[*account.Account](es, &account.AccountFactory{}, &account.AccountEventFactory{}),
+	}
+}
+
+type DepositAccountCommandResult struct {
+	Test string
+}
+
+func (d *DepositAccountCommandHandler) Handle(ctx context.Context, request *account.DepositAccountEvent) (*DepositAccountCommandResult, error) {
+	log.Printf("Deposit run %+v %+v", request, request)
+
+	// a := NewAccount()
+	//
+	// a.AccountID = request.body.AccountID
+	// a.Amount = 0
+	// // a.SetVersion(2)
+	//
+	// log.Printf("%+v", a)
+	//
+	// a.Raise(request.body)
+
+	repo := NewAccountRepository(d.es)
+
+	result, err := repo.r.FindByID(ctx, request.AccountID)
+	if err != nil {
+		log.Println("Unable find by id", err)
+		return nil, err
+	}
+	log.Printf("result: %+v", result)
+
+	result.Raise(request)
+
+	if err := repo.r.Update(ctx, result); err != nil {
+		log.Println("Unable update a request in es", err)
+		return nil, err
+	}
+
+	// if err := repo.r.UpdateByID(ctx, request.body.AccountID, func(aggregate *Account) error {
+	// 	// aggregate = a
+	// 	return nil
+	// }); err != nil {
+	// 	log.Println("Unable add a request to es", err)
+	//
+	// 	return nil, err
+	// }
+
+	// if err := repo.r.Update(ctx, a); err != nil {
+	// 	return nil, err
+	// }
+
+	// if err := repo.r.Add(context.Background(), a); err != nil {
+	// 	log.Println("Unable add a request to es", err)
+	// 	return nil, err
+	// }
+
+	// if err := d.db.Transaction(func(tx *gorm.DB) error {
+	// 	acc := &account.Account{}
+	//
+	// 	// SELECT * FROM accounts WHERE id = ? FOR UPDATE;
+	// 	// NOTE: Hold lock for the row for all tx and release when commit or rollback it
+	// 	if err := tx.Clauses(clause.Locking{
+	// 		Strength: "UPDATE",
+	// 	}).First(&acc, "id = ?", request.body.AccountID).Error; err != nil {
+	// 		return err
+	// 	}
+	//
+	// 	a := NewAccount()
+	//
+	// 	// accountID, err := acc.ID.Value()
+	// 	// accountIDStr, ok := accountID.(string)
+	// 	// if !ok {
+	// 	// 	return err
+	// 	// }
+	//
+	// 	a.AccountID = request.body.AccountID
+	// 	a.Amount = float64(acc.Balance)
+	//
+	// 	a.Raise(request.body)
+	//
+	// 	repo := NewAccountRepository(d.es)
+	//
+	// 	if err := repo.r.Add(ctx, a); err != nil {
+	// 		log.Println("Unable add a request to es", err)
+	// 		return err
+	// 	}
+	//
+	// 	log.Printf("%+v", a)
+	//
+	// 	// acc.Balance += account.Money(request.body.Amount)
+	// 	return tx.Save(acc).Error
+	// }); err != nil {
+	// 	return nil, err
+	// }
+
+	// repo := NewAccountRepository(d.es)
+	//
+	// request.body.EventRaiserAggregate = cqrs.NewEventRaiserAggregate(request.body.onEvent)
+	// request.body.Raise(request.body)
+	//
+	// log.Println("get changes", request.body.Changes())
+	//
+	// if err := repo.r.Add(ctx, request.body); err != nil {
+	// 	log.Println("Unable add a request to es", err)
+	// 	return nil, err
+	// }
 
 	// if err := d.db.Transaction(func(tx *gorm.DB) error {
 	// 	acc := &account.Account{}
@@ -89,10 +157,11 @@ func (d *DepositAccountCommandHandler) Handle(ctx context.Context, request *Depo
 	return nil, nil
 }
 
-var _ cqrs.Handler[*DepositAccountBody, *DepositAccountCommand] = (*DepositAccountCommandHandler)(nil)
+var _ cqrs.Handler[*DepositAccountCommandResult, *account.DepositAccountEvent] = (*DepositAccountCommandHandler)(nil)
 
-func NewDepositAccountCommandHandler(db *gorm.DB) *DepositAccountCommandHandler {
+func NewDepositAccountCommandHandler(db *gorm.DB, es cqrs.EventStore) *DepositAccountCommandHandler {
 	return &DepositAccountCommandHandler{
 		db: db,
+		es: es,
 	}
 }

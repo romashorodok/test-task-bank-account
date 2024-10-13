@@ -132,18 +132,18 @@ func NewMessage(uuid string, data []byte) *Message {
 }
 
 type Event interface {
-	WithAggregateID(id string)
+	EventName() string
 }
 
-type MessageJsonMarshaller[F Event] struct{}
+type MessageJsonMarshaller struct{}
 
-func (m MessageJsonMarshaller[F]) uuid() string {
+func (m MessageJsonMarshaller) uuid() string {
 	return uuid.New().String()
 }
 
 var _AGGREGATE_ID = "aggregateID"
 
-func (m MessageJsonMarshaller[F]) Marshal(val F) (*Message, error) {
+func (m MessageJsonMarshaller) Marshal(val Event) (*Message, error) {
 	data, err := json.Marshal(val)
 	if err != nil {
 		return nil, err
@@ -152,10 +152,12 @@ func (m MessageJsonMarshaller[F]) Marshal(val F) (*Message, error) {
 	return msg, nil
 }
 
-func (m MessageJsonMarshaller[F]) Unmarshal(msg *Message, val F) error {
+func (m MessageJsonMarshaller) Unmarshal(msg *Message, val Event) error {
 	if err := json.Unmarshal(msg.Payload, val); err != nil {
 		return err
 	}
-	val.WithAggregateID(msg.Metadata.Get(_AGGREGATE_ID))
+	// val.WithAggregateID(msg.Metadata.Get(_AGGREGATE_ID))
 	return nil
 }
+
+var JsonMarshaller = MessageJsonMarshaller{}
