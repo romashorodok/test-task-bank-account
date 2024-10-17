@@ -6,12 +6,13 @@ import (
 
 	"github.com/romashorodok/test-task-bank-account/account/pkg/model/account"
 	"github.com/romashorodok/test-task-bank-account/contrib/cqrs"
+	"github.com/romashorodok/test-task-bank-account/contrib/cqrs/eventstore"
 	"gorm.io/gorm"
 )
 
 type DepositAccountCommandHandler struct {
-	db *gorm.DB
-	es cqrs.EventStore
+	db   *gorm.DB
+	repo *eventstore.Repository[*account.Account]
 
 	marshaller cqrs.MessageJsonMarshaller
 }
@@ -26,15 +27,15 @@ func (d *DepositAccountCommandHandler) Factory(msg *cqrs.Message) (cqrs.Request,
 	return &command, nil
 }
 
-type accountRepository struct {
-	r *cqrs.Repository[*account.Account]
-}
+// type accountRepository struct {
+// 	r *cqrs.Repository[*account.Account]
+// }
 
-func NewAccountRepository(es cqrs.EventStore) *accountRepository {
-	return &accountRepository{
-		r: cqrs.NewRepository[*account.Account](es, &account.AccountFactory{}, &account.AccountEventFactory{}),
-	}
-}
+// func NewAccountRepository(es cqrs.EventStore) *accountRepository {
+// 	return &accountRepository{
+// 		r: cqrs.NewRepository(es, &account.AccountFactory{}, &account.AccountEventFactory{}),
+// 	}
+// }
 
 type DepositAccountCommandResult struct {
 	Test string
@@ -42,6 +43,22 @@ type DepositAccountCommandResult struct {
 
 func (d *DepositAccountCommandHandler) Handle(ctx context.Context, request *account.DepositAccountEvent) (*DepositAccountCommandResult, error) {
 	log.Printf("Deposit run %+v %+v", request, request)
+
+	if err := d.repo.UpdateByID(
+		ctx,
+		request.AccountID,
+		func(aggregate *account.Account) error {
+			aggregate.Raise(
+				account.NewDepositAccountEvent(
+					aggregate.AggregateID(),
+					request.Amount,
+				),
+			)
+			return nil
+		},
+	); err != nil {
+		return nil, err
+	}
 
 	// a := NewAccount()
 	//
@@ -53,21 +70,21 @@ func (d *DepositAccountCommandHandler) Handle(ctx context.Context, request *acco
 	//
 	// a.Raise(request.body)
 
-	repo := NewAccountRepository(d.es)
-
-	result, err := repo.r.FindByID(ctx, request.AccountID)
-	if err != nil {
-		log.Println("Unable find by id", err)
-		return nil, err
-	}
-	log.Printf("result: %+v", result)
-
-	result.Raise(request)
-
-	if err := repo.r.Update(ctx, result); err != nil {
-		log.Println("Unable update a request in es", err)
-		return nil, err
-	}
+	// repo := NewAccountRepository(d.es)
+	//
+	// result, err := repo.r.FindByID(ctx, request.AccountID)
+	// if err != nil {
+	// 	log.Println("Unable find by id", err)
+	// 	return nil, err
+	// }
+	// log.Printf("result: %+v", result)
+	//
+	// result.Raise(request)
+	//
+	// if err := repo.r.Update(ctx, result); err != nil {
+	// 	log.Println("Unable update a request in es", err)
+	// 	return nil, err
+	// }
 
 	// if err := repo.r.UpdateByID(ctx, request.body.AccountID, func(aggregate *Account) error {
 	// 	// aggregate = a
@@ -159,9 +176,10 @@ func (d *DepositAccountCommandHandler) Handle(ctx context.Context, request *acco
 
 var _ cqrs.Handler[*DepositAccountCommandResult, *account.DepositAccountEvent] = (*DepositAccountCommandHandler)(nil)
 
-func NewDepositAccountCommandHandler(db *gorm.DB, es cqrs.EventStore) *DepositAccountCommandHandler {
+func NewDepositAccountCommandHandler(db *gorm.DB, accountEntity *eventstore.EventStoreEntity) *DepositAccountCommandHandler {
+	repo := eventstore.NewRepository(accountEntity, account.AccountFactory{}, account.AccountEventFactory{})
 	return &DepositAccountCommandHandler{
-		db: db,
-		es: es,
+		db:   db,
+		repo: repo,
 	}
 }
