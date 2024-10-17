@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"log"
 	"net/http"
 	"os"
@@ -44,42 +43,63 @@ func main() {
 	estore := account.NewEventStoreGorm(db)
 
 	rel := estore.Register(&account.Account{})
-	id := account.ID(uuid.MustParse("735a7d00-ea43-4730-b4b2-9377e9ebe5ac"))
+	_ = rel
+	idStr := "735a7d00-ea43-4730-b4b2-9377e9ebe5ac"
+	id := account.ID(uuid.MustParse(idStr))
+	_ = id
+
 	// rel.AddAggregate(context.Background(), id)
 
-	test2, _ := json.Marshal(&Command{"Withdrow some"})
-	test1, _ := json.Marshal(&Command{"Deposit some"})
+	// test2, _ := json.Marshal(&Command{"Withdrow some"})
+	// test1, _ := json.Marshal(&Command{"Deposit some"})
 
-	if err = rel.AppendEvents(context.Background(), id, []cqrs.RawEvent{
-		{
-			Name: "DepositCommadn",
-			Data: test1,
-		},
-		{
-			Name: "WithdrawCommand",
-			Data: test2,
-		},
-	}); err != nil {
-		log.Println(err)
-		return
-	}
+	// if err = rel.AppendEvents(context.Background(), id, []cqrs.RawEvent{
+	// 	{
+	// 		Name: "DepositCommadn",
+	// 		Data: test1,
+	// 	},
+	// 	{
+	// 		Name: "WithdrawCommand",
+	// 		Data: test2,
+	// 	},
+	// }); err != nil {
+	// 	log.Println(err)
+	// 	return
+	// }
 
-	test3, _ := json.Marshal(&Command{"Snapshot"})
-	if err = rel.AddSnapshot(context.Background(), id, cqrs.RawSnapshot{
-		Version: 3,
-		Data:    test3,
-	}); err != nil {
-		log.Println("Snapshot error", err)
-		return
-	}
+	// test3, _ := json.Marshal(&Command{"Snapshot"})
+	// if err = rel.AddSnapshot(context.Background(), id, cqrs.RawSnapshot{
+	// 	Version: 3,
+	// 	Data:    test3,
+	// }); err != nil {
+	// 	log.Println("Snapshot error", err)
+	// 	return
+	// }
 
-	latest, err := rel.LatestSnapshots(context.Background(), id)
-	if err != nil {
-		log.Println("Latest snapshot error", err)
-		return
-	}
+	// latest, err := rel.LatestSnapshots(context.Background(), id)
+	// if err != nil {
+	// 	log.Println("Latest snapshot error", err)
+	// 	return
+	// }
+	//
+	// log.Printf("Found latest %+v", latest)
 
-	log.Printf("Found latest %+v", latest)
+	// acc := account.NewAccount()
+	// acc.ID = id
+	// acc.Raise(account.NewDepositAccountEvent(idStr, 20))
+
+	// result := repo.Add(context.Background(), acc)
+	// log.Println("result error", result)
+
+	// log.Println("repo result", result)
+
+	repo := account.NewRepository[*account.Account](rel, account.AccountFactory{}, account.AccountEventFactory{})
+
+	err = repo.UpdateByID(context.Background(), idStr, func(aggregate *account.Account) error {
+		aggregate.Raise(account.NewDepositAccountEvent(aggregate.AggregateID(), 20))
+		return nil
+	})
+	log.Println("Update by id error", err)
 
 	pool, err := pgconfig.BuildPool()
 	if err != nil {

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/romashorodok/test-task-bank-account/contrib/cqrs"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -43,7 +44,7 @@ type Snapshot struct {
 	UpdatedAt   time.Time
 }
 
-type EventStoreRelation struct {
+type EventStoreEntity struct {
 	aggregatesTableName string
 	eventsTableName     string
 	snapshotsTableName  string
@@ -51,17 +52,22 @@ type EventStoreRelation struct {
 	db *gorm.DB
 }
 
-func (e *EventStoreRelation) AddAggregate(ctx context.Context, id ID) error {
+var ErrUnableAddAggregate = errors.New("unable add aggregate")
+
+func (e *EventStoreEntity) AddAggregate(ctx context.Context, id string) error {
 	aggregate := Aggregate{
 		Version: 0,
-		ID:      id,
+		ID:      ID(uuid.MustParse(id)),
 	}
-	return e.db.Table(e.aggregatesTableName).Create(&aggregate).Error
+	if err := e.db.Table(e.aggregatesTableName).Create(&aggregate).Error; err != nil {
+		return errors.Join(err, ErrUnableAddAggregate)
+	}
+	return nil
 }
 
 var ErrNotFoundRootAggregate = errors.New("not found root aggregate")
 
-func (e *EventStoreRelation) AppendEvents(ctx context.Context, aggregateID ID, events []cqrs.RawEvent) error {
+func (e *EventStoreEntity) AppendEvents(ctx context.Context, aggregateID string, events []cqrs.RawEvent) error {
 	return e.db.Transaction(func(tx *gorm.DB) error {
 		var aggregate Aggregate
 
@@ -79,7 +85,7 @@ func (e *EventStoreRelation) AppendEvents(ctx context.Context, aggregateID ID, e
 			}
 
 			if err := tx.Table(e.eventsTableName).Create(&Event{
-				AggregateID: aggregateID,
+				AggregateID: ID(uuid.MustParse(aggregateID)),
 				Name:        event.Name,
 				Version:     aggregate.Version,
 				Data:        event.Data,
@@ -93,7 +99,7 @@ func (e *EventStoreRelation) AppendEvents(ctx context.Context, aggregateID ID, e
 
 var ErrSnapshotWithGreaterVersionThanAggregate = errors.New("snapshot version is greater than that of the aggregate")
 
-func (e *EventStoreRelation) AddSnapshot(ctx context.Context, aggregateID ID, snapshot cqrs.RawSnapshot) error {
+func (e *EventStoreEntity) AddSnapshot(ctx context.Context, aggregateID string, snapshot cqrs.RawSnapshot) error {
 	return e.db.Transaction(func(tx *gorm.DB) error {
 		var aggregate Aggregate
 
@@ -108,14 +114,14 @@ func (e *EventStoreRelation) AddSnapshot(ctx context.Context, aggregateID ID, sn
 		}
 
 		return tx.Table(e.snapshotsTableName).Create(&Snapshot{
-			AggregateID: aggregateID,
+			AggregateID: ID(uuid.MustParse(aggregateID)),
 			Version:     snapshot.Version,
 			Data:        snapshot.Data,
 		}).Error
 	})
 }
 
-func (e *EventStoreRelation) LatestSnapshots(ctx context.Context, aggregateID ID) (*Snapshot, error) {
+func (e *EventStoreEntity) LatestSnapshots(ctx context.Context, aggregateID string) (*Snapshot, error) {
 	var snapshot Snapshot
 
 	stmt := e.db.Table(e.snapshotsTableName).Order("version DESC").Limit(1).First(&snapshot, "aggregate_id = ?", aggregateID)
@@ -126,18 +132,32 @@ func (e *EventStoreRelation) LatestSnapshots(ctx context.Context, aggregateID ID
 	return &snapshot, nil
 }
 
-type EventStoreGorm struct {
-	db     *gorm.DB
-	tables map[string]*EventStoreRelation
+func (e *EventStoreEntity) Events(ctx context.Context, aggregateID string) ([]Event, error) {
+	var events []Event
+
+	stmt := e.db.Table(e.eventsTableName).Find(&events, "aggregate_id = ?", aggregateID)
+	if stmt.Error != nil {
+		return nil, stmt.Error
+	}
+
+	return events, nil
 }
 
-func (e *EventStoreGorm) Register(model any) *EventStoreRelation {
+type EventStoreGorm struct {
+	db     *gorm.DB
+	tables map[string]*EventStoreEntity
+}
+
+func getTablePrefixName(model any) string {
 	v := reflect.ValueOf(model)
 	t := reflect.Indirect(v).Type()
+	return strings.ToLower(t.Name())
+}
 
-	structName := strings.ToLower(t.Name())
+func (e *EventStoreGorm) Register(model any) *EventStoreEntity {
+	structName := getTablePrefixName(model)
 
-	e.tables[structName] = &EventStoreRelation{
+	e.tables[structName] = &EventStoreEntity{
 		aggregatesTableName: fmt.Sprintf("%s_aggregates", structName),
 		eventsTableName:     fmt.Sprintf("%s_events", structName),
 		snapshotsTableName:  fmt.Sprintf("%s_snapshots", structName),
@@ -218,8 +238,145 @@ func (e *EventStoreGorm) setUpdateTrigger(label, table string) {
 func NewEventStoreGorm(db *gorm.DB) *EventStoreGorm {
 	return &EventStoreGorm{
 		db:     db,
-		tables: make(map[string]*EventStoreRelation),
+		tables: make(map[string]*EventStoreEntity),
 	}
+}
+
+type Repository[T cqrs.Aggregate] struct {
+	entity *EventStoreEntity
+
+	aggregateFactory cqrs.AggregateFactory[T]
+	eventFactory     cqrs.EventFactory
+	eventMarshaler   cqrs.EventMarshaler
+}
+
+// TODO: Single TX and add unit of work support
+// TODO: Look at event sourcing libs
+func (r *Repository[T]) Add(ctx context.Context, aggregate T) error {
+	rawEvents, err := cqrs.MarshalEvents(aggregate.Changes(), cqrs.JSONEventMarshaler{})
+	log.Println(rawEvents, err)
+
+	aggregateID := aggregate.AggregateID()
+
+	if err = r.entity.AddAggregate(ctx, aggregateID); err != nil {
+		return err
+	}
+
+	if err = r.entity.AppendEvents(ctx, aggregateID, rawEvents); err != nil {
+		return err
+	}
+
+	snapshotData, err := aggregate.Snapshot()
+	if err != nil {
+		return err
+	}
+
+	snapshot := cqrs.RawSnapshot{
+		Version: aggregate.InitialVersion(),
+		Data:    snapshotData,
+	}
+
+	// TODO: Add ulid snapshot version instead of int
+	// TODO: Need keep last 5 version as example
+	// TODO: Is it possible have a type safe version of model ??? Not as jsonb
+	if err = r.entity.AddSnapshot(ctx, aggregateID, snapshot); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (r *Repository[T]) FindByID(ctx context.Context, aggregateID string) (T, error) {
+	var nilAggregate T
+
+	snapshot, err := r.entity.LatestSnapshots(ctx, aggregateID)
+	if err != nil {
+		return nilAggregate, err
+	}
+
+	// TODO: select only events from snapshots, not all
+	events, err := r.entity.Events(ctx, aggregateID)
+	if err != nil {
+		return nilAggregate, err
+	}
+
+	cqrsEvents := make([]cqrs.Event, len(events))
+	for i, entityEvent := range events {
+		event, err := r.eventFactory.CreateEmptyEvent(entityEvent.Name)
+		if err != nil {
+			continue
+		}
+
+		if err = r.eventMarshaler.UnmarshalEvent(entityEvent.Data, event); err != nil {
+			return nilAggregate, err
+		}
+
+		cqrsEvents[i] = event
+	}
+
+	if snapshot != nil {
+		return r.aggregateFactory.NewAggregateFromSnapshotAndEvents(cqrs.RawSnapshot{
+			Version: 0,
+			Data:    snapshot.Data,
+		}, cqrsEvents)
+	}
+
+	return r.aggregateFactory.NewAggregateFromEvents(cqrsEvents)
+}
+
+func (r *Repository[T]) Update(ctx context.Context, aggregate T) error {
+	cqrsEvents := aggregate.Changes()
+	if len(cqrsEvents) == 0 {
+		return nil
+	}
+
+	rawEvents, err := cqrs.MarshalEvents(cqrsEvents, r.eventMarshaler)
+	if err != nil {
+		return err
+	}
+
+	aggregateID := aggregate.AggregateID()
+
+	if err := r.entity.AppendEvents(ctx, aggregateID, rawEvents); err != nil {
+		return err
+	}
+
+	snapshot, err := aggregate.Snapshot()
+	if err != nil {
+		return err
+	}
+
+	if err = r.entity.AddSnapshot(ctx, aggregateID, cqrs.RawSnapshot{
+		Version: aggregate.InitialVersion(),
+		Data:    snapshot,
+	}); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (r *Repository[T]) UpdateByID(ctx context.Context, aggregateID string, updater func(aggregate T) error) error {
+	aggregate, err := r.FindByID(ctx, aggregateID)
+	if err != nil {
+		return err
+	}
+
+	if err = updater(aggregate); err != nil {
+		return err
+	}
+
+	return r.Update(ctx, aggregate)
+}
+
+func NewRepository[T cqrs.Aggregate](entity *EventStoreEntity, af cqrs.AggregateFactory[T], ef cqrs.EventFactory) *Repository[T] {
+	repo := &Repository[T]{
+		entity:           entity,
+		aggregateFactory: af,
+		eventFactory:     ef,
+		eventMarshaler:   cqrs.JSONEventMarshaler{},
+	}
+	return repo
 }
 
 type Account struct {
