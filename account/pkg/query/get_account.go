@@ -1,5 +1,7 @@
 package query
 
+// import "github.com/romashorodok/test-task-bank-account/contrib/cqrs"
+
 // import (
 // 	"context"
 // 	"encoding/json"

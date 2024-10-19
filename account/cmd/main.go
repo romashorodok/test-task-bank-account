@@ -15,6 +15,7 @@ import (
 	"github.com/romashorodok/test-task-bank-account/account/pkg/command"
 	"github.com/romashorodok/test-task-bank-account/account/pkg/config"
 	"github.com/romashorodok/test-task-bank-account/account/pkg/model/account"
+	"github.com/romashorodok/test-task-bank-account/account/pkg/query"
 	"github.com/romashorodok/test-task-bank-account/contrib/cqrs"
 	"github.com/romashorodok/test-task-bank-account/contrib/cqrs/eventstore"
 )
@@ -49,11 +50,13 @@ func main() {
 	ctx := context.Background()
 
 	// cqrs.Register(bus, ctx, &command.CreateAccountCommand{}, command.NewCreateAccountCommandHandler(db))
+
+	cqrs.Register(bus, ctx, &account.CreateAccountEvent{}, command.NewCreateAccountCommandHandler(db, accountEntity))
 	cqrs.Register(bus, ctx, &account.DepositAccountEvent{}, command.NewDepositAccountCommandHandler(db, accountEntity))
-	// cqrs.Register(bus, ctx, &command.WithdrawAccountCommand{}, command.NewWithdrawAccountCommandHandler(db))
+	cqrs.Register(bus, ctx, &account.WithdrawAccountEvent{}, command.NewWithdrawAccountCommandHandler(db, accountEntity))
 
 	queryBus := cqrs.NewBusContext()
-	// cqrs.Register(queryBus, ctx, &query.GetAccountQuery{}, query.NewGetAccountQueryHandler(db))
+	cqrs.Register(queryBus, ctx, &account.GetAccountListEvent{}, query.NewGetAccountListQueryHandler(db, accountEntity))
 
 	router := chi.NewRouter()
 

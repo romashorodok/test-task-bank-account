@@ -7,8 +7,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/romashorodok/test-task-bank-account/account/pkg/model/account"
+	"github.com/romashorodok/test-task-bank-account/account/pkg/query"
 
-	// "github.com/romashorodok/test-task-bank-account/account/pkg/query"
 	"github.com/romashorodok/test-task-bank-account/contrib/cqrs"
 	"github.com/romashorodok/test-task-bank-account/contrib/httputil"
 )
@@ -32,30 +32,33 @@ type AccountHandler struct {
 }
 
 func (a *AccountHandler) createAccount(w http.ResponseWriter, r *http.Request) {
-	// log.Println(("Create account handler run"))
-	// if err := cqrs.Dispatch(a.commandBus, r.Context(), command.NewCreateAccountCommand()); err != nil {
-	// 	writeError(w, http.StatusInternalServerError, err)
-	// 	return
-	// }
+	log.Println(("Create account handler run"))
+
+	if err := cqrs.Dispatch(a.commandBus, r.Context(), account.NewCreateAccountEvent()); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
 }
 
 func (a *AccountHandler) getAccounts(w http.ResponseWriter, r *http.Request) {
-	// result, err := cqrs.DispatchQuery(a.queryBus, r.Context(), query.NewGetAccountsQuery())
-	// if err != nil {
-	// 	writeError(w, http.StatusNotFound, err)
-	// 	return
-	// }
-	// json.NewEncoder(w).Encode(result)
+	log.Println(("Get account handler run"))
+
+	result, err := cqrs.DispatchQuery[*query.GetAccountListQueryResult](a.queryBus, r.Context(), account.NewGetAccountList(0, 10))
+	if err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	json.NewEncoder(w).Encode(result)
 }
 
 func (a *AccountHandler) withdraw(w http.ResponseWriter, r *http.Request) {
-	// id := chi.URLParam(r, "id")
-	// log.Println(("Withdraw handler run"))
-	//
-	// if err := cqrs.Dispatch(a.commandBus, r.Context(), command.NewWithdrawAccountCommand(id, 20)); err != nil {
-	// 	writeError(w, http.StatusBadRequest, err)
-	// 	return
-	// }
+	id := chi.URLParam(r, "id")
+	log.Println(("Withdraw handler run"))
+
+	if err := cqrs.Dispatch(a.commandBus, r.Context(), account.NewWithdrawAccountEvent(id, 20)); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
 }
 
 func (a *AccountHandler) deposit(w http.ResponseWriter, r *http.Request) {

@@ -171,7 +171,7 @@ func (d *DepositAccountCommandHandler) Handle(ctx context.Context, request *acco
 	// }); err != nil {
 	// 	return nil, err
 	// }
-	return nil, nil
+	return &DepositAccountCommandResult{}, nil
 }
 
 var _ cqrs.Handler[*DepositAccountCommandResult, *account.DepositAccountEvent] = (*DepositAccountCommandHandler)(nil)

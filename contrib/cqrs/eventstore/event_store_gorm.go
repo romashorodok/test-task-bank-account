@@ -83,6 +83,7 @@ type Snapshot struct {
 	UpdatedAt   time.Time
 }
 
+// TODO: Refactor it like a query builder for tx and repository map the query result
 type EventStoreEntity struct {
 	aggregatesTableName string
 	eventsTableName     string
@@ -180,6 +181,17 @@ func (e *EventStoreEntity) Events(ctx context.Context, aggregateID string) ([]Ev
 	}
 
 	return events, nil
+}
+
+func (e *EventStoreEntity) ListByOffsetStmt(ctx context.Context, offset, limit int) *gorm.DB {
+	subQuery := e.db.Table(e.snapshotsTableName + " as s2").
+		Select("MAX(version)").
+		Where("s2.aggregate_id = s.aggregate_id")
+
+	return e.db.Table(e.snapshotsTableName+" as s").
+		Where("version = (?)", subQuery).
+		Limit(limit).
+		Offset(offset)
 }
 
 type EventStoreGorm struct {
@@ -406,6 +418,41 @@ func (r *Repository[T]) UpdateByID(ctx context.Context, aggregateID string, upda
 	}
 
 	return r.Update(ctx, aggregate)
+}
+
+func (r *Repository[T]) ListByOffset(ctx context.Context, offset, limit int) ([]T, error) {
+	rows, err := r.entity.ListByOffsetStmt(ctx, offset, limit).Rows()
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make([]T, 0, limit)
+
+	var snapshot Snapshot
+	for i := 0; rows.Next(); i++ {
+		// TODO: This is too much alloc
+		if err := rows.Scan(
+			&snapshot.AggregateID,
+			&snapshot.Version,
+			&snapshot.Data,
+			&snapshot.CreatedAt,
+			&snapshot.UpdatedAt,
+		); err != nil {
+			log.Println("ListByOffset scan error. Err:", err)
+			return nil, err
+		}
+
+		var item T
+		if err := json.Unmarshal(snapshot.Data, &item); err != nil {
+			log.Println("ListByOffset deserialize error. Err:", err)
+			return nil, err
+		}
+
+		result = append(result, item)
+	}
+
+	return result, nil
 }
 
 func NewRepository[T cqrs.Aggregate](entity *EventStoreEntity, af cqrs.AggregateFactory[T], ef cqrs.EventFactory) *Repository[T] {
