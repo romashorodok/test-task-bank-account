@@ -293,7 +293,6 @@ type Repository[T cqrs.Aggregate] struct {
 	eventMarshaler   cqrs.EventMarshaler
 }
 
-// TODO: Single TX and add unit of work support
 // TODO: Look at event sourcing libs
 func (r *Repository[T]) Add(ctx context.Context, tx *gorm.DB, aggregate T) error {
 	rawEvents, err := cqrs.MarshalEvents(aggregate.Changes(), cqrs.JSONEventMarshaler{})
