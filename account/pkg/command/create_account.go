@@ -11,6 +11,7 @@ import (
 )
 
 type CreateAccountCommandHandler struct {
+	db   *gorm.DB
 	repo *eventstore.Repository[*account.Account]
 
 	marshaller cqrs.MessageJsonMarshaller
@@ -32,11 +33,11 @@ func (c *CreateAccountCommandHandler) Handle(ctx context.Context, request *accou
 		uuidAccountID = uuid.New()
 	}
 
-	aggregate := &account.Account{
-		ID: account.ID(uuidAccountID),
-	}
-
-	if err := c.repo.Add(ctx, aggregate); err != nil {
+	if err = eventstore.WithTransaction(ctx, c.db, func(tx *gorm.DB) error {
+		return c.repo.Add(ctx, tx, &account.Account{
+			ID: account.ID(uuidAccountID),
+		})
+	}); err != nil {
 		return nil, err
 	}
 
@@ -45,9 +46,10 @@ func (c *CreateAccountCommandHandler) Handle(ctx context.Context, request *accou
 
 var _ cqrs.Handler[*CreateAccountCommandResult, *account.CreateAccountEvent] = (*CreateAccountCommandHandler)(nil)
 
-func NewCreateAccountCommandHandler(_ *gorm.DB, accountEntity *eventstore.EventStoreEntity) *CreateAccountCommandHandler {
+func NewCreateAccountCommandHandler(db *gorm.DB, accountEntity *eventstore.EventStoreEntity) *CreateAccountCommandHandler {
 	repo := eventstore.NewRepository(accountEntity, account.AccountFactory{}, account.AccountEventFactory{})
 	return &CreateAccountCommandHandler{
+		db:   db,
 		repo: repo,
 	}
 }

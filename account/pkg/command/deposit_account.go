@@ -27,16 +27,6 @@ func (d *DepositAccountCommandHandler) Factory(msg *cqrs.Message) (cqrs.Request,
 	return &command, nil
 }
 
-// type accountRepository struct {
-// 	r *cqrs.Repository[*account.Account]
-// }
-
-// func NewAccountRepository(es cqrs.EventStore) *accountRepository {
-// 	return &accountRepository{
-// 		r: cqrs.NewRepository(es, &account.AccountFactory{}, &account.AccountEventFactory{}),
-// 	}
-// }
-
 type DepositAccountCommandResult struct {
 	Test string
 }
@@ -44,133 +34,15 @@ type DepositAccountCommandResult struct {
 func (d *DepositAccountCommandHandler) Handle(ctx context.Context, request *account.DepositAccountEvent) (*DepositAccountCommandResult, error) {
 	log.Printf("Deposit run %+v %+v", request, request)
 
-	if err := d.repo.UpdateByID(
-		ctx,
-		request.AccountID,
-		func(aggregate *account.Account) error {
-			aggregate.Raise(
-				account.NewDepositAccountEvent(
-					aggregate.AggregateID(),
-					request.Amount,
-				),
-			)
+	if err := eventstore.WithTransaction(ctx, d.db, func(tx *gorm.DB) error {
+		return d.repo.UpdateByID(ctx, tx, request.AccountID, func(aggregate *account.Account) error {
+			aggregate.Raise(account.NewDepositAccountEvent(aggregate.AggregateID(), request.Amount))
 			return nil
-		},
-	); err != nil {
+		})
+	}); err != nil {
 		return nil, err
 	}
 
-	// a := NewAccount()
-	//
-	// a.AccountID = request.body.AccountID
-	// a.Amount = 0
-	// // a.SetVersion(2)
-	//
-	// log.Printf("%+v", a)
-	//
-	// a.Raise(request.body)
-
-	// repo := NewAccountRepository(d.es)
-	//
-	// result, err := repo.r.FindByID(ctx, request.AccountID)
-	// if err != nil {
-	// 	log.Println("Unable find by id", err)
-	// 	return nil, err
-	// }
-	// log.Printf("result: %+v", result)
-	//
-	// result.Raise(request)
-	//
-	// if err := repo.r.Update(ctx, result); err != nil {
-	// 	log.Println("Unable update a request in es", err)
-	// 	return nil, err
-	// }
-
-	// if err := repo.r.UpdateByID(ctx, request.body.AccountID, func(aggregate *Account) error {
-	// 	// aggregate = a
-	// 	return nil
-	// }); err != nil {
-	// 	log.Println("Unable add a request to es", err)
-	//
-	// 	return nil, err
-	// }
-
-	// if err := repo.r.Update(ctx, a); err != nil {
-	// 	return nil, err
-	// }
-
-	// if err := repo.r.Add(context.Background(), a); err != nil {
-	// 	log.Println("Unable add a request to es", err)
-	// 	return nil, err
-	// }
-
-	// if err := d.db.Transaction(func(tx *gorm.DB) error {
-	// 	acc := &account.Account{}
-	//
-	// 	// SELECT * FROM accounts WHERE id = ? FOR UPDATE;
-	// 	// NOTE: Hold lock for the row for all tx and release when commit or rollback it
-	// 	if err := tx.Clauses(clause.Locking{
-	// 		Strength: "UPDATE",
-	// 	}).First(&acc, "id = ?", request.body.AccountID).Error; err != nil {
-	// 		return err
-	// 	}
-	//
-	// 	a := NewAccount()
-	//
-	// 	// accountID, err := acc.ID.Value()
-	// 	// accountIDStr, ok := accountID.(string)
-	// 	// if !ok {
-	// 	// 	return err
-	// 	// }
-	//
-	// 	a.AccountID = request.body.AccountID
-	// 	a.Amount = float64(acc.Balance)
-	//
-	// 	a.Raise(request.body)
-	//
-	// 	repo := NewAccountRepository(d.es)
-	//
-	// 	if err := repo.r.Add(ctx, a); err != nil {
-	// 		log.Println("Unable add a request to es", err)
-	// 		return err
-	// 	}
-	//
-	// 	log.Printf("%+v", a)
-	//
-	// 	// acc.Balance += account.Money(request.body.Amount)
-	// 	return tx.Save(acc).Error
-	// }); err != nil {
-	// 	return nil, err
-	// }
-
-	// repo := NewAccountRepository(d.es)
-	//
-	// request.body.EventRaiserAggregate = cqrs.NewEventRaiserAggregate(request.body.onEvent)
-	// request.body.Raise(request.body)
-	//
-	// log.Println("get changes", request.body.Changes())
-	//
-	// if err := repo.r.Add(ctx, request.body); err != nil {
-	// 	log.Println("Unable add a request to es", err)
-	// 	return nil, err
-	// }
-
-	// if err := d.db.Transaction(func(tx *gorm.DB) error {
-	// 	acc := &account.Account{}
-	//
-	// 	// SELECT * FROM accounts WHERE id = ? FOR UPDATE;
-	// 	// NOTE: Hold lock for the row for all tx and release when commit or rollback it
-	// 	if err := tx.Clauses(clause.Locking{
-	// 		Strength: "UPDATE",
-	// 	}).First(&acc, "id = ?", request.body.AccountID).Error; err != nil {
-	// 		return err
-	// 	}
-	//
-	// 	acc.Balance += account.Money(request.body.Amount)
-	// 	return tx.Save(acc).Error
-	// }); err != nil {
-	// 	return nil, err
-	// }
 	return &DepositAccountCommandResult{}, nil
 }
 

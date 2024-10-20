@@ -14,6 +14,7 @@ type GetAccountListQueryResult struct {
 }
 
 type GetAccountListQueryHandler struct {
+	db   *gorm.DB
 	repo *eventstore.Repository[*account.Account]
 
 	marshaller cqrs.MessageJsonMarshaller
@@ -28,7 +29,10 @@ func (g *GetAccountListQueryHandler) Factory(msg *cqrs.Message) (cqrs.Request, e
 }
 
 func (g *GetAccountListQueryHandler) Handle(ctx context.Context, request *account.GetAccountListEvent) (*GetAccountListQueryResult, error) {
-	result, err := g.repo.ListByOffset(ctx, request.Offset, request.Limit)
+	var result []*account.Account
+	var err error
+
+	result, err = g.repo.ListByOffset(ctx, g.db, request.Offset, request.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -40,9 +44,10 @@ func (g *GetAccountListQueryHandler) Handle(ctx context.Context, request *accoun
 
 var _ cqrs.Handler[*GetAccountListQueryResult, *account.GetAccountListEvent] = (*GetAccountListQueryHandler)(nil)
 
-func NewGetAccountListQueryHandler(_ *gorm.DB, accountEntity *eventstore.EventStoreEntity) *GetAccountListQueryHandler {
+func NewGetAccountListQueryHandler(db *gorm.DB, accountEntity *eventstore.EventStoreEntity) *GetAccountListQueryHandler {
 	repo := eventstore.NewRepository(accountEntity, account.AccountFactory{}, account.AccountEventFactory{})
 	return &GetAccountListQueryHandler{
+		db:   db,
 		repo: repo,
 	}
 }

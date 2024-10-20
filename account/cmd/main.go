@@ -20,14 +20,6 @@ import (
 	"github.com/romashorodok/test-task-bank-account/contrib/cqrs/eventstore"
 )
 
-var DB_TABLES = []interface{}{
-	&account.Account{},
-}
-
-type Command struct {
-	Key string `json:"key"`
-}
-
 func main() {
 	sigterm := make(chan os.Signal, 1)
 	signal.Notify(sigterm, syscall.SIGTERM, syscall.SIGINT)
@@ -48,8 +40,6 @@ func main() {
 		panic(err)
 	}
 	ctx := context.Background()
-
-	// cqrs.Register(bus, ctx, &command.CreateAccountCommand{}, command.NewCreateAccountCommandHandler(db))
 
 	cqrs.Register(bus, ctx, &account.CreateAccountEvent{}, command.NewCreateAccountCommandHandler(db, accountEntity))
 	cqrs.Register(bus, ctx, &account.DepositAccountEvent{}, command.NewDepositAccountCommandHandler(db, accountEntity))

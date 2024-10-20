@@ -83,23 +83,20 @@ type Snapshot struct {
 	UpdatedAt   time.Time
 }
 
-// TODO: Refactor it like a query builder for tx and repository map the query result
 type EventStoreEntity struct {
 	aggregatesTableName string
 	eventsTableName     string
 	snapshotsTableName  string
-
-	db *gorm.DB
 }
 
 var ErrUnableAddAggregate = errors.New("unable add aggregate")
 
-func (e *EventStoreEntity) AddAggregate(ctx context.Context, id string) error {
+func (e *EventStoreEntity) AddAggregate(ctx context.Context, tx *gorm.DB, id string) error {
 	aggregate := Aggregate{
 		Version: 0,
 		ID:      ID(uuid.MustParse(id)),
 	}
-	if err := e.db.Table(e.aggregatesTableName).Create(&aggregate).Error; err != nil {
+	if err := tx.Table(e.aggregatesTableName).Create(&aggregate).Error; err != nil {
 		return errors.Join(err, ErrUnableAddAggregate)
 	}
 	return nil
@@ -107,64 +104,60 @@ func (e *EventStoreEntity) AddAggregate(ctx context.Context, id string) error {
 
 var ErrNotFoundRootAggregate = errors.New("not found root aggregate")
 
-func (e *EventStoreEntity) AppendEvents(ctx context.Context, aggregateID string, events []cqrs.RawEvent) error {
-	return e.db.Transaction(func(tx *gorm.DB) error {
-		var aggregate Aggregate
+func (e *EventStoreEntity) AppendEvents(ctx context.Context, tx *gorm.DB, aggregateID string, events []cqrs.RawEvent) error {
+	var aggregate Aggregate
 
-		if err := tx.Table(e.aggregatesTableName).Clauses(clause.Locking{
-			Strength: "UPDATE",
-		}).First(&aggregate, "id = ?", aggregateID).Error; err != nil {
-			return errors.Join(err, ErrNotFoundRootAggregate)
+	if err := tx.Table(e.aggregatesTableName).Clauses(clause.Locking{
+		Strength: "UPDATE",
+	}).First(&aggregate, "id = ?", aggregateID).Error; err != nil {
+		return errors.Join(err, ErrNotFoundRootAggregate)
+	}
+
+	for _, event := range events {
+		aggregate.Version += 1
+
+		if err := tx.Table(e.aggregatesTableName).Updates(&aggregate).Error; err != nil {
+			return err
 		}
 
-		for _, event := range events {
-			aggregate.Version += 1
-
-			if err := tx.Table(e.aggregatesTableName).Updates(&aggregate).Error; err != nil {
-				return err
-			}
-
-			if err := tx.Table(e.eventsTableName).Create(&Event{
-				AggregateID: ID(uuid.MustParse(aggregateID)),
-				Name:        event.Name,
-				Version:     aggregate.Version,
-				Data:        event.Data,
-			}).Error; err != nil {
-				return err
-			}
+		if err := tx.Table(e.eventsTableName).Create(&Event{
+			AggregateID: ID(uuid.MustParse(aggregateID)),
+			Name:        event.Name,
+			Version:     aggregate.Version,
+			Data:        event.Data,
+		}).Error; err != nil {
+			return err
 		}
-		return nil
-	})
+	}
+	return nil
 }
 
 var ErrSnapshotWithGreaterVersionThanAggregate = errors.New("snapshot version is greater than that of the aggregate")
 
-func (e *EventStoreEntity) AddSnapshot(ctx context.Context, aggregateID string, snapshot cqrs.RawSnapshot) error {
-	return e.db.Transaction(func(tx *gorm.DB) error {
-		var aggregate Aggregate
+func (e *EventStoreEntity) AddSnapshot(ctx context.Context, tx *gorm.DB, aggregateID string, snapshot cqrs.RawSnapshot) error {
+	var aggregate Aggregate
 
-		if err := tx.Table(e.aggregatesTableName).Clauses(clause.Locking{
-			Strength: "UPDATE",
-		}).First(&aggregate, "id = ?", aggregateID).Error; err != nil {
-			return errors.Join(err, ErrNotFoundRootAggregate)
-		}
+	if err := tx.Table(e.aggregatesTableName).Clauses(clause.Locking{
+		Strength: "UPDATE",
+	}).First(&aggregate, "id = ?", aggregateID).Error; err != nil {
+		return errors.Join(err, ErrNotFoundRootAggregate)
+	}
 
-		if aggregate.Version < snapshot.Version {
-			return ErrSnapshotWithGreaterVersionThanAggregate
-		}
+	if aggregate.Version < snapshot.Version {
+		return ErrSnapshotWithGreaterVersionThanAggregate
+	}
 
-		return tx.Table(e.snapshotsTableName).Create(&Snapshot{
-			AggregateID: ID(uuid.MustParse(aggregateID)),
-			Version:     snapshot.Version,
-			Data:        snapshot.Data,
-		}).Error
-	})
+	return tx.Table(e.snapshotsTableName).Create(&Snapshot{
+		AggregateID: ID(uuid.MustParse(aggregateID)),
+		Version:     snapshot.Version,
+		Data:        snapshot.Data,
+	}).Error
 }
 
-func (e *EventStoreEntity) LatestSnapshots(ctx context.Context, aggregateID string) (*Snapshot, error) {
+func (e *EventStoreEntity) LatestSnapshots(ctx context.Context, tx *gorm.DB, aggregateID string) (*Snapshot, error) {
 	var snapshot Snapshot
 
-	stmt := e.db.Table(e.snapshotsTableName).Order("version DESC").Limit(1).First(&snapshot, "aggregate_id = ?", aggregateID)
+	stmt := tx.Table(e.snapshotsTableName).Order("version DESC").Limit(1).First(&snapshot, "aggregate_id = ?", aggregateID)
 	if stmt.Error != nil {
 		return nil, stmt.Error
 	}
@@ -172,10 +165,10 @@ func (e *EventStoreEntity) LatestSnapshots(ctx context.Context, aggregateID stri
 	return &snapshot, nil
 }
 
-func (e *EventStoreEntity) Events(ctx context.Context, aggregateID string) ([]Event, error) {
+func (e *EventStoreEntity) Events(ctx context.Context, tx *gorm.DB, aggregateID string) ([]Event, error) {
 	var events []Event
 
-	stmt := e.db.Table(e.eventsTableName).Find(&events, "aggregate_id = ?", aggregateID)
+	stmt := tx.Table(e.eventsTableName).Find(&events, "aggregate_id = ?", aggregateID)
 	if stmt.Error != nil {
 		return nil, stmt.Error
 	}
@@ -183,12 +176,12 @@ func (e *EventStoreEntity) Events(ctx context.Context, aggregateID string) ([]Ev
 	return events, nil
 }
 
-func (e *EventStoreEntity) ListByOffsetStmt(ctx context.Context, offset, limit int) *gorm.DB {
-	subQuery := e.db.Table(e.snapshotsTableName + " as s2").
+func (e *EventStoreEntity) ListByOffsetStmt(ctx context.Context, tx *gorm.DB, offset, limit int) *gorm.DB {
+	subQuery := tx.Table(e.snapshotsTableName + " as s2").
 		Select("MAX(version)").
 		Where("s2.aggregate_id = s.aggregate_id")
 
-	return e.db.Table(e.snapshotsTableName+" as s").
+	return tx.Table(e.snapshotsTableName+" as s").
 		Where("version = (?)", subQuery).
 		Limit(limit).
 		Offset(offset)
@@ -212,7 +205,6 @@ func (e *EventStoreGorm) Register(model any) *EventStoreEntity {
 		aggregatesTableName: fmt.Sprintf("%s_aggregates", structName),
 		eventsTableName:     fmt.Sprintf("%s_events", structName),
 		snapshotsTableName:  fmt.Sprintf("%s_snapshots", structName),
-		db:                  e.db,
 	}
 
 	table, _ := e.tables[structName]
@@ -303,17 +295,17 @@ type Repository[T cqrs.Aggregate] struct {
 
 // TODO: Single TX and add unit of work support
 // TODO: Look at event sourcing libs
-func (r *Repository[T]) Add(ctx context.Context, aggregate T) error {
+func (r *Repository[T]) Add(ctx context.Context, tx *gorm.DB, aggregate T) error {
 	rawEvents, err := cqrs.MarshalEvents(aggregate.Changes(), cqrs.JSONEventMarshaler{})
 	log.Println(rawEvents, err)
 
 	aggregateID := aggregate.AggregateID()
 
-	if err = r.entity.AddAggregate(ctx, aggregateID); err != nil {
+	if err = r.entity.AddAggregate(ctx, tx, aggregateID); err != nil {
 		return err
 	}
 
-	if err = r.entity.AppendEvents(ctx, aggregateID, rawEvents); err != nil {
+	if err = r.entity.AppendEvents(ctx, tx, aggregateID, rawEvents); err != nil {
 		return err
 	}
 
@@ -330,23 +322,23 @@ func (r *Repository[T]) Add(ctx context.Context, aggregate T) error {
 	// TODO: Add ulid snapshot version instead of int
 	// TODO: Need keep last 5 version as example
 	// TODO: Is it possible have a type safe version of model ??? Not as jsonb
-	if err = r.entity.AddSnapshot(ctx, aggregateID, snapshot); err != nil {
+	if err = r.entity.AddSnapshot(ctx, tx, aggregateID, snapshot); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (r *Repository[T]) FindByID(ctx context.Context, aggregateID string) (T, error) {
+func (r *Repository[T]) FindByID(ctx context.Context, tx *gorm.DB, aggregateID string) (T, error) {
 	var nilAggregate T
 
-	snapshot, err := r.entity.LatestSnapshots(ctx, aggregateID)
+	snapshot, err := r.entity.LatestSnapshots(ctx, tx, aggregateID)
 	if err != nil {
 		return nilAggregate, err
 	}
 
 	// TODO: select only events from snapshots, not all
-	events, err := r.entity.Events(ctx, aggregateID)
+	events, err := r.entity.Events(ctx, tx, aggregateID)
 	if err != nil {
 		return nilAggregate, err
 	}
@@ -375,7 +367,7 @@ func (r *Repository[T]) FindByID(ctx context.Context, aggregateID string) (T, er
 	return r.aggregateFactory.NewAggregateFromEvents(cqrsEvents)
 }
 
-func (r *Repository[T]) Update(ctx context.Context, aggregate T) error {
+func (r *Repository[T]) Update(ctx context.Context, tx *gorm.DB, aggregate T) error {
 	cqrsEvents := aggregate.Changes()
 	if len(cqrsEvents) == 0 {
 		return nil
@@ -388,7 +380,7 @@ func (r *Repository[T]) Update(ctx context.Context, aggregate T) error {
 
 	aggregateID := aggregate.AggregateID()
 
-	if err = r.entity.AppendEvents(ctx, aggregateID, rawEvents); err != nil {
+	if err = r.entity.AppendEvents(ctx, tx, aggregateID, rawEvents); err != nil {
 		return err
 	}
 
@@ -397,7 +389,7 @@ func (r *Repository[T]) Update(ctx context.Context, aggregate T) error {
 		return err
 	}
 
-	if err = r.entity.AddSnapshot(ctx, aggregateID, cqrs.RawSnapshot{
+	if err = r.entity.AddSnapshot(ctx, tx, aggregateID, cqrs.RawSnapshot{
 		Version: aggregate.InitialVersion(),
 		Data:    snapshot,
 	}); err != nil {
@@ -407,8 +399,8 @@ func (r *Repository[T]) Update(ctx context.Context, aggregate T) error {
 	return nil
 }
 
-func (r *Repository[T]) UpdateByID(ctx context.Context, aggregateID string, updater func(aggregate T) error) error {
-	aggregate, err := r.FindByID(ctx, aggregateID)
+func (r *Repository[T]) UpdateByID(ctx context.Context, tx *gorm.DB, aggregateID string, updater func(aggregate T) error) error {
+	aggregate, err := r.FindByID(ctx, tx, aggregateID)
 	if err != nil {
 		return err
 	}
@@ -417,11 +409,11 @@ func (r *Repository[T]) UpdateByID(ctx context.Context, aggregateID string, upda
 		return err
 	}
 
-	return r.Update(ctx, aggregate)
+	return r.Update(ctx, tx, aggregate)
 }
 
-func (r *Repository[T]) ListByOffset(ctx context.Context, offset, limit int) ([]T, error) {
-	rows, err := r.entity.ListByOffsetStmt(ctx, offset, limit).Rows()
+func (r *Repository[T]) ListByOffset(ctx context.Context, tx *gorm.DB, offset, limit int) ([]T, error) {
+	rows, err := r.entity.ListByOffsetStmt(ctx, tx, offset, limit).Rows()
 	if err != nil {
 		return nil, err
 	}

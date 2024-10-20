@@ -11,6 +11,7 @@ import (
 )
 
 type WithdrawAccountCommandHandler struct {
+	db         *gorm.DB
 	repo       *eventstore.Repository[*account.Account]
 	marshaller cqrs.MessageJsonMarshaller
 }
@@ -28,19 +29,12 @@ func (w *WithdrawAccountCommandHandler) Factory(msg *cqrs.Message) (cqrs.Request
 func (w *WithdrawAccountCommandHandler) Handle(ctx context.Context, request *account.WithdrawAccountEvent) (*WithdrawAccountCommandResult, error) {
 	log.Printf("Withdraw run %+v %+v", request, request)
 
-	if err := w.repo.UpdateByID(
-		ctx,
-		request.AccountID,
-		func(aggregate *account.Account) error {
-			aggregate.Raise(
-				account.NewWithdrawAccountEvent(
-					aggregate.AggregateID(),
-					request.Amount,
-				),
-			)
+	if err := eventstore.WithTransaction(ctx, w.db, func(tx *gorm.DB) error {
+		return w.repo.UpdateByID(ctx, tx, request.AccountID, func(aggregate *account.Account) error {
+			aggregate.Raise(account.NewWithdrawAccountEvent(aggregate.AggregateID(), request.Amount))
 			return nil
-		},
-	); err != nil {
+		})
+	}); err != nil {
 		return nil, err
 	}
 
@@ -51,9 +45,10 @@ type WithdrawAccountCommandResult struct{}
 
 var _ cqrs.Handler[*WithdrawAccountCommandResult, *account.WithdrawAccountEvent] = (*WithdrawAccountCommandHandler)(nil)
 
-func NewWithdrawAccountCommandHandler(_ *gorm.DB, accountEntity *eventstore.EventStoreEntity) *WithdrawAccountCommandHandler {
+func NewWithdrawAccountCommandHandler(db *gorm.DB, accountEntity *eventstore.EventStoreEntity) *WithdrawAccountCommandHandler {
 	repo := eventstore.NewRepository(accountEntity, account.AccountFactory{}, account.AccountEventFactory{})
 	return &WithdrawAccountCommandHandler{
+		db:   db,
 		repo: repo,
 	}
 }
