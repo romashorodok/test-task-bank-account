@@ -33,8 +33,6 @@ services:
         max-file: "3"
     ports:
       - '5432:5432'
-    volumes:
-      - ./build/postgres:/docker-entrypoint-initdb.d
     networks:
         - bridge
 
